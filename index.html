@@ -205,7 +205,7 @@ window.addEventListener('load', async () => {
   const now = new Date();
   document.getElementById('monthPicker').value =
     `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
-  document.getElementById('monthPicker').addEventListener('change', () => { tickets = []; renderTable(); });
+  document.getElementById('monthPicker').addEventListener('change', () => { loadMonth(); });
 
   if (CLIENT_ID.startsWith("TU_")) {
     document.getElementById('configWarning').classList.remove('hidden');
@@ -271,6 +271,7 @@ async function showApp() {
   document.getElementById('loginView').classList.add('hidden');
   document.getElementById('appView').classList.remove('hidden');
   document.getElementById('userName').textContent = account.name || account.username;
+  loadMonth(); // carga los tickets ya guardados del mes actual
 }
 
 // ---- CÁMARA ----
@@ -428,13 +429,18 @@ async function generateAndSave() {
   try {
     accessToken = await getToken();
     const month = document.getElementById('monthPicker').value; // YYYY-MM
-    const csv = buildCSV();
-    setSaveStatus("Subiendo a OneDrive...", '');
-
-    // 1. Asegurar carpeta del mes
     const folderPath = `${FOLDER_NAME}/${month}`;
-    // 2. Subir CSV de la nota
-    await uploadFile(`${folderPath}/nota-gastos-${month}.csv`, new Blob([csv], {type:'text/csv'}));
+
+    setSaveStatus("Guardando en OneDrive...", '');
+
+    // 1. Subir CSV legible con TODOS los tickets actuales (acumulado del mes)
+    const csv = buildCSV();
+    await uploadFile(`${folderPath}/nota-gastos-${month}.csv`, new Blob(['\ufeff'+csv], {type:'text/csv'}));
+
+    // 2. Guardar datos.json (incluye imágenes) para poder recuperar el mes al volver a entrar
+    const datos = JSON.stringify({ month, tickets });
+    await uploadFile(`${folderPath}/datos.json`, new Blob([datos], {type:'application/json'}));
+
     // 3. Subir cada imagen de ticket
     for (let i = 0; i < tickets.length; i++) {
       const blob = dataURLtoBlob(tickets[i].imageDataUrl);
@@ -445,6 +451,33 @@ async function generateAndSave() {
     setSaveStatus("Error al guardar: " + e.message, 'error');
   } finally {
     btn.disabled = false;
+  }
+}
+
+// Carga los tickets ya guardados del mes seleccionado desde OneDrive
+async function loadMonth() {
+  const month = document.getElementById('monthPicker').value;
+  if (!month || !account) return;
+  try {
+    setSaveStatus("Cargando tickets guardados del mes...", '');
+    accessToken = await getToken();
+    const path = `${FOLDER_NAME}/${month}/datos.json`;
+    const url = `https://graph.microsoft.com/v1.0/me/drive/root:/${path.split('/').map(encodeURIComponent).join('/')}:/content`;
+    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+    if (res.ok) {
+      const data = await res.json();
+      tickets = data.tickets || [];
+      renderTable();
+      setSaveStatus(`Cargados ${tickets.length} tickets guardados de ${month}.`, 'success');
+    } else if (res.status === 404) {
+      tickets = [];
+      renderTable();
+      setSaveStatus(`No hay tickets guardados aún en ${month}. Empieza a capturar.`, '');
+    } else {
+      throw new Error('Graph ' + res.status);
+    }
+  } catch (e) {
+    setSaveStatus("No se pudieron cargar tickets previos: " + e.message, 'error');
   }
 }
 
