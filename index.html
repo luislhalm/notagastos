@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notas de Gastos</title>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1419;
+    --surface: #1a212b;
+    --surface-2: #232c38;
+    --border: #2d3845;
+    --text: #e6edf3;
+    --muted: #8b98a5;
+    --accent: #2f81f7;
+    --accent-hover: #4a92f8;
+    --green: #2ea043;
+    --red: #da3633;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+    padding: 0;
+    min-height: 100vh;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .user-info { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--muted); }
+  main { max-width: 760px; margin: 0 auto; padding: 20px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  button {
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    border: none;
+    border-radius: 8px;
+    padding: 11px 18px;
+    cursor: pointer;
+    transition: background .15s, opacity .15s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: var(--border); }
+  .btn-danger { background: transparent; color: var(--red); padding: 6px 10px; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .login-wrap {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-height: 70vh; text-align: center; gap: 20px;
+  }
+  .login-wrap h2 { font-size: 24px; }
+  .login-wrap p { color: var(--muted); max-width: 420px; }
+  .hidden { display: none !important; }
+  video, canvas#preview { width: 100%; border-radius: 8px; background: #000; }
+  .camera-controls { display: flex; gap: 12px; margin-top: 12px; justify-content: center; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+  td input {
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 6px; padding: 6px 8px; width: 100%; font-family: inherit; font-size: 13px;
+  }
+  .total-row td { font-weight: 700; font-size: 15px; border-top: 2px solid var(--border); }
+  .label { font-size: 12px; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; display: block; letter-spacing: .03em; }
+  .ocr-text { background: var(--surface-2); border-radius: 8px; padding: 12px; font-size: 12px; color: var(--muted); white-space: pre-wrap; max-height: 140px; overflow-y: auto; font-family: monospace; margin-top: 10px; }
+  .progress { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-top: 12px; }
+  .progress-bar { height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+  .status { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .status.success { color: var(--green); }
+  .status.error { color: var(--red); }
+  .month-selector { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .month-selector input { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 9px 12px; font-family: inherit; font-size: 14px; }
+  .ticket-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; cursor: pointer; }
+  .empty { text-align: center; color: var(--muted); padding: 30px; font-size: 14px; }
+  .badge { background: var(--surface-2); padding: 3px 9px; border-radius: 20px; font-size: 12px; color: var(--muted); }
+  .config-note { background: rgba(47,129,247,.1); border: 1px solid rgba(47,129,247,.3); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+  .config-note code { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="loginView" class="login-wrap">
+  <h2>📋 Notas de Gastos</h2>
+  <p>Inicia sesión con tu cuenta corporativa de Microsoft para capturar tickets y generar tus notas de gastos mensuales.</p>
+  <div id="configWarning" class="config-note hidden" style="max-width:500px;text-align:left;">
+    ⚠️ Antes de usar: edita las constantes <code>CLIENT_ID</code> y <code>TENANT_ID</code> en el código con los datos de tu registro de aplicación en Azure Entra ID.
+  </div>
+  <button class="btn-primary" onclick="signIn()">Iniciar sesión con Microsoft</button>
+</div>
+
+<!-- APP -->
+<div id="appView" class="hidden">
+  <header>
+    <h1>📋 Notas de Gastos</h1>
+    <div class="user-info">
+      <span id="userName"></span>
+      <button class="btn-secondary" style="padding:6px 12px" onclick="signOut()">Salir</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="month-selector">
+      <span class="label" style="margin:0">Mes</span>
+      <input type="month" id="monthPicker">
+      <span class="badge" id="ticketCount">0 tickets</span>
+    </div>
+
+    <!-- ACCIONES -->
+    <div class="card">
+      <div class="btn-row">
+        <button class="btn-primary" onclick="openCamera()">📷 Capturar ticket</button>
+        <button class="btn-secondary" onclick="document.getElementById('fileInput').click()">🖼️ Subir imagen</button>
+        <button class="btn-secondary" onclick="generateAndSave()" id="saveBtn">☁️ Generar y guardar nota del mes</button>
+      </div>
+      <input type="file" id="fileInput" accept="image/*" class="hidden" onchange="handleFileUpload(event)">
+      <div id="saveStatus" class="status"></div>
+    </div>
+
+    <!-- CAMARA -->
+    <div class="card hidden" id="cameraCard">
+      <span class="label">Cámara</span>
+      <video id="video" autoplay playsinline></video>
+      <div class="camera-controls">
+        <button class="btn-primary" onclick="capturePhoto()">Tomar foto</button>
+        <button class="btn-secondary" onclick="closeCamera()">Cancelar</button>
+      </div>
+      <canvas id="canvas" class="hidden"></canvas>
+    </div>
+
+    <!-- PROCESANDO OCR -->
+    <div class="card hidden" id="ocrCard">
+      <span class="label">Procesando ticket (OCR)</span>
+      <canvas id="preview"></canvas>
+      <div class="progress"><div class="progress-bar" id="ocrProgress"></div></div>
+      <div class="status" id="ocrStatus">Reconociendo texto...</div>
+      <div class="ocr-text hidden" id="ocrText"></div>
+    </div>
+
+    <!-- TABLA -->
+    <div class="card">
+      <span class="label">Tickets del mes</span>
+      <div id="tableWrap">
+        <div class="empty">Aún no hay tickets este mes. Captura uno para empezar.</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+/* ============================================================
+   CONFIGURACIÓN — EDITA ESTOS VALORES
+   Regístralo en Azure Portal > Entra ID > App registrations
+   Permisos Graph (delegados): User.Read, Files.ReadWrite
+   Redirect URI: la URL donde alojes este archivo (tipo SPA)
+   ============================================================ */
+const CLIENT_ID = "b036a67c-aae7-4856-a620-05dfd7f26093";   // Application (client) ID — APP Nota de gastos
+const TENANT_ID = "4af64d57-4be2-49ee-863f-1a7faee6e22b";   // Directory (tenant) ID
+const FOLDER_NAME = "Notas de Gastos";        // Carpeta destino en OneDrive
+const GRAPH_SCOPES = ["User.Read", "Files.ReadWrite"];
+
+/* ============================================================ */
+
+const msalConfig = {
+  auth: {
+    clientId: CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${TENANT_ID}`,
+    redirectUri: window.location.href.split('#')[0].split('?')[0]
+  },
+  cache: { cacheLocation: "sessionStorage" }
+};
+
+let msalInstance, account = null, accessToken = null;
+let tickets = []; // {id, fecha, comercio, importe, texto, imageDataUrl}
+
+// ---- INIT ----
+window.addEventListener('load', async () => {
+  // Mes actual por defecto
+  const now = new Date();
+  document.getElementById('monthPicker').value =
+    `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  document.getElementById('monthPicker').addEventListener('change', () => { tickets = []; renderTable(); });
+
+  if (CLIENT_ID.startsWith("TU_")) {
+    document.getElementById('configWarning').classList.remove('hidden');
+    return;
+  }
+
+  msalInstance = new msal.PublicClientApplication(msalConfig);
+  await msalInstance.initialize();
+  const resp = await msalInstance.handleRedirectPromise();
+  if (resp) { account = resp.account; }
+  else {
+    const accts = msalInstance.getAllAccounts();
+    if (accts.length) account = accts[0];
+  }
+  if (account) showApp();
+});
+
+async function signIn() {
+  if (CLIENT_ID.startsWith("TU_")) {
+    alert("Configura primero CLIENT_ID y TENANT_ID en el código.");
+    return;
+  }
+  try {
+    const resp = await msalInstance.loginPopup({ scopes: GRAPH_SCOPES });
+    account = resp.account;
+    showApp();
+  } catch (e) {
+    // fallback a redirect si el popup se bloquea
+    await msalInstance.loginRedirect({ scopes: GRAPH_SCOPES });
+  }
+}
+
+function signOut() { msalInstance.logoutPopup({ account }); }
+
+async function getToken() {
+  try {
+    const r = await msalInstance.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
+    return r.accessToken;
+  } catch {
+    const r = await msalInstance.acquireTokenPopup({ scopes: GRAPH_SCOPES });
+    return r.accessToken;
+  }
+}
+
+async function showApp() {
+  document.getElementById('loginView').classList.add('hidden');
+  document.getElementById('appView').classList.remove('hidden');
+  document.getElementById('userName').textContent = account.name || account.username;
+}
+
+// ---- CÁMARA ----
+let stream = null;
+async function openCamera() {
+  document.getElementById('cameraCard').classList.remove('hidden');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    document.getElementById('video').srcObject = stream;
+  } catch (e) {
+    alert("No se pudo acceder a la cámara: " + e.message);
+    closeCamera();
+  }
+}
+function closeCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null;
+  document.getElementById('cameraCard').classList.add('hidden');
+}
+function capturePhoto() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  closeCamera();
+  processImage(dataUrl);
+}
+
+function handleFileUpload(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => processImage(reader.result);
+  reader.readAsDataURL(file);
+  e.target.value = '';
+}
+
+// ---- OCR ----
+async function processImage(dataUrl) {
+  const card = document.getElementById('ocrCard');
+  card.classList.remove('hidden');
+  const preview = document.getElementById('preview');
+  const img = new Image();
+  img.onload = () => {
+    const ctx = preview.getContext('2d');
+    const maxW = 600;
+    const scale = Math.min(1, maxW / img.width);
+    preview.width = img.width * scale;
+    preview.height = img.height * scale;
+    ctx.drawImage(img, 0, 0, preview.width, preview.height);
+  };
+  img.src = dataUrl;
+
+  document.getElementById('ocrText').classList.add('hidden');
+  document.getElementById('ocrStatus').textContent = "Reconociendo texto...";
+  document.getElementById('ocrStatus').className = "status";
+
+  try {
+    const { data } = await Tesseract.recognize(dataUrl, 'spa', {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          document.getElementById('ocrProgress').style.width = (m.progress*100) + '%';
+        }
+      }
+    });
+    const text = data.text;
+    const parsed = parseTicket(text);
+    const ticket = {
+      id: Date.now(),
+      fecha: parsed.fecha,
+      comercio: parsed.comercio,
+      importe: parsed.importe,
+      texto: text,
+      imageDataUrl: dataUrl
+    };
+    tickets.push(ticket);
+    renderTable();
+
+    document.getElementById('ocrStatus').textContent = "✓ Ticket añadido. Revisa los datos en la tabla.";
+    document.getElementById('ocrStatus').className = "status success";
+    const ot = document.getElementById('ocrText');
+    ot.textContent = text.trim().slice(0, 500);
+    ot.classList.remove('hidden');
+    setTimeout(() => card.classList.add('hidden'), 2500);
+  } catch (e) {
+    document.getElementById('ocrStatus').textContent = "Error en OCR: " + e.message;
+    document.getElementById('ocrStatus').className = "status error";
+  }
+}
+
+// Extracción heurística de fecha, comercio e importe
+function parseTicket(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  // Importe: busca el mayor número con formato moneda (total)
+  let importe = '';
+  const amountRe = /(\d{1,4}[.,]\d{2})/g;
+  let amounts = [];
+  for (const l of lines) {
+    const totalLine = /total|importe|a pagar|euros?/i.test(l);
+    let m; while ((m = amountRe.exec(l)) !== null) {
+      amounts.push({ val: parseFloat(m[1].replace(',', '.')), priority: totalLine ? 2 : 1 });
+    }
+  }
+  if (amounts.length) {
+    amounts.sort((a,b) => b.priority - a.priority || b.val - a.val);
+    importe = amounts[0].val.toFixed(2);
+  }
+  // Fecha
+  let fecha = '';
+  const dateRe = /(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/;
+  for (const l of lines) { const m = l.match(dateRe); if (m) { fecha = m[1]; break; } }
+  // Comercio: primera línea significativa
+  let comercio = lines.find(l => l.length > 3 && /[A-Za-zÁÉÍÓÚáéíóú]/.test(l)) || '';
+  comercio = comercio.slice(0, 40);
+  return { fecha, comercio, importe };
+}
+
+// ---- TABLA ----
+function renderTable() {
+  const wrap = document.getElementById('tableWrap');
+  document.getElementById('ticketCount').textContent = tickets.length + ' tickets';
+  if (!tickets.length) {
+    wrap.innerHTML = '<div class="empty">Aún no hay tickets este mes. Captura uno para empezar.</div>';
+    return;
+  }
+  let total = 0;
+  let rows = tickets.map((t, i) => {
+    total += parseFloat(t.importe) || 0;
+    return `<tr>
+      <td><img class="ticket-thumb" src="${t.imageDataUrl}" onclick="window.open().document.write('<img src=\\'${t.imageDataUrl}\\' style=max-width:100%>')"></td>
+      <td><input value="${escapeHtml(t.fecha)}" onchange="updateTicket(${i},'fecha',this.value)"></td>
+      <td><input value="${escapeHtml(t.comercio)}" onchange="updateTicket(${i},'comercio',this.value)"></td>
+      <td><input value="${escapeHtml(t.importe)}" style="text-align:right" onchange="updateTicket(${i},'importe',this.value);renderTable()"></td>
+      <td><button class="btn-danger" onclick="removeTicket(${i})">✕</button></td>
+    </tr>`;
+  }).join('');
+  wrap.innerHTML = `<table>
+    <thead><tr><th>Ticket</th><th>Fecha</th><th>Comercio</th><th style="text-align:right">Importe €</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr class="total-row"><td colspan="3">TOTAL</td><td style="text-align:right">${total.toFixed(2)} €</td><td></td></tr></tfoot>
+  </table>`;
+}
+function updateTicket(i, field, val) { tickets[i][field] = val; }
+function removeTicket(i) { tickets.splice(i,1); renderTable(); }
+function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+// ---- GENERAR Y GUARDAR EN ONEDRIVE/SHAREPOINT ----
+async function generateAndSave() {
+  if (!tickets.length) { setSaveStatus("No hay tickets que guardar.", 'error'); return; }
+  const btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  setSaveStatus("Obteniendo acceso...", '');
+  try {
+    accessToken = await getToken();
+    const month = document.getElementById('monthPicker').value; // YYYY-MM
+    const csv = buildCSV();
+    setSaveStatus("Subiendo a OneDrive...", '');
+
+    // 1. Asegurar carpeta del mes
+    const folderPath = `${FOLDER_NAME}/${month}`;
+    // 2. Subir CSV de la nota
+    await uploadFile(`${folderPath}/nota-gastos-${month}.csv`, new Blob([csv], {type:'text/csv'}));
+    // 3. Subir cada imagen de ticket
+    for (let i = 0; i < tickets.length; i++) {
+      const blob = dataURLtoBlob(tickets[i].imageDataUrl);
+      await uploadFile(`${folderPath}/tickets/ticket-${i+1}-${tickets[i].id}.jpg`, blob);
+    }
+    setSaveStatus(`✓ Nota guardada en OneDrive › ${folderPath} (${tickets.length} tickets)`, 'success');
+  } catch (e) {
+    setSaveStatus("Error al guardar: " + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function buildCSV() {
+  let total = 0;
+  let rows = tickets.map((t,i) => {
+    total += parseFloat(t.importe)||0;
+    return [i+1, t.fecha, `"${(t.comercio||'').replace(/"/g,'""')}"`, (t.importe||'0')].join(',');
+  });
+  return ['Nº,Fecha,Comercio,Importe €', ...rows, `,,TOTAL,${total.toFixed(2)}`].join('\n');
+}
+
+async function uploadFile(path, blob) {
+  // Sube a OneDrive del usuario. Para SharePoint cambia la URL (ver nota abajo).
+  const url = `https://graph.microsoft.com/v1.0/me/drive/root:/${encodeURIComponent(path).replace(/%2F/g,'/')}:/content`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': blob.type || 'application/octet-stream' },
+    body: blob
+  });
+  if (!res.ok) throw new Error(`Graph ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+function dataURLtoBlob(dataUrl) {
+  const [head, body] = dataUrl.split(',');
+  const mime = head.match(/:(.*?);/)[1];
+  const bin = atob(body);
+  const arr = new Uint8Array(bin.length);
+  for (let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+function setSaveStatus(msg, type) {
+  const el = document.getElementById('saveStatus');
+  el.textContent = msg;
+  el.className = 'status' + (type ? ' ' + type : '');
+}
+</script>
+</body>
+</html>
