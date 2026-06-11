@@ -768,34 +768,36 @@ async function buildExcel(month) {
   }
 
   // Rellenar una fila por ticket
+  // Acumuladores para precalcular totales (no depender del recálculo de Excel)
+  const totCol = {F:0,G:0,H:0,I:0,J:0,K:0,L:0,M:0,N:0};
   tickets.forEach((t, idx) => {
     const r = 8 + idx;
     const cat = CATEGORIAS.find(c => c.id === t.categoria) || CATEGORIAS.find(c=>c.id==='otros');
     const pago = FORMAS_PAGO.find(p => p.id === t.formaPago) || FORMAS_PAGO[0];
     const serial = fechaSerial(t.fecha);
     if (serial != null) xml = setCellValue(xml, 'B'+r, serial);
-    xml = setCellValue(xml, 'C'+r, t.comercio || cat.label, true); // concepto (texto)
+    xml = setCellValue(xml, 'C'+r, t.comercio || cat.label, true);
     const imp = parseFloat(String(t.importe).replace(',','.')) || 0;
-    // Importe del gasto en su columna de categoría
     xml = setCellValue(xml, cat.col + r, imp);
-    // Forma de pago: importe directo en L (trabajador), M (visa) o N (gasoil)
     xml = setCellValue(xml, pago.col + r, imp);
+    totCol[cat.col]  = (totCol[cat.col]  || 0) + imp;
+    totCol[pago.col] = (totCol[pago.col] || 0) + imp;
   });
+
+  // Escribir totales en fila 36 como VALORES PUROS (sin fórmulas)
+  // Así Excel Online los muestra directamente sin necesitar recálculo
+  ['F','G','H','I','J','K','L','M','N'].forEach(col => {
+    xml = setCellValue(xml, col+'36', totCol[col]||0);
+  });
+  // J38: suma total de gastos
+  const totalGasto = ['F','G','H','I','J','K'].reduce((s,c)=>s+(totCol[c]||0),0);
+  xml = setCellValue(xml, 'J38', totalGasto);
+  // N38: total pagos trabajador
+  xml = setCellValue(xml, 'N38', totCol['L']||0);
 
   files['xl/worksheets/sheet1.xml'] = enc.encode(xml);
 
-  // 3. Forzar recálculo al abrir (Excel recalcula las fórmulas SUM)
-  if (files['xl/workbook.xml']) {
-    let wb = dec.decode(files['xl/workbook.xml']);
-    if (!/fullCalcOnLoad/.test(wb)) {
-      if (/<calcPr[^>]*\/>/.test(wb)) wb = wb.replace(/<calcPr([^>]*)\/>/, '<calcPr$1 fullCalcOnLoad="1"/>');
-      else if (/<calcPr[^>]*>/.test(wb)) wb = wb.replace(/<calcPr([^>]*)>/, '<calcPr$1 fullCalcOnLoad="1">');
-      else wb = wb.replace(/<\/workbook>/, '<calcPr fullCalcOnLoad="1"/></workbook>');
-    }
-    files['xl/workbook.xml'] = enc.encode(wb);
-  }
-
-  // 4. Recomprimir
+  // 3. Recomprimir
   const out = fflate.zipSync(files);
   return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
