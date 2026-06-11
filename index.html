@@ -212,15 +212,19 @@ window.addEventListener('load', async () => {
     return;
   }
 
-  msalInstance = new msal.PublicClientApplication(msalConfig);
-  await msalInstance.initialize();
-  const resp = await msalInstance.handleRedirectPromise();
-  if (resp) { account = resp.account; }
-  else {
-    const accts = msalInstance.getAllAccounts();
-    if (accts.length) account = accts[0];
+  try {
+    msalInstance = new msal.PublicClientApplication(msalConfig);
+    await msalInstance.initialize();
+    const resp = await msalInstance.handleRedirectPromise();
+    if (resp) { account = resp.account; }
+    else {
+      const accts = msalInstance.getAllAccounts();
+      if (accts.length) account = accts[0];
+    }
+    if (account) showApp();
+  } catch (e) {
+    alert("Error de autenticación: " + (e.errorMessage || e.message || e));
   }
-  if (account) showApp();
 });
 
 async function signIn() {
@@ -228,25 +232,27 @@ async function signIn() {
     alert("Configura primero CLIENT_ID y TENANT_ID en el código.");
     return;
   }
+  if (!msalInstance) {
+    alert("La librería de inicio de sesión aún no se ha cargado. Espera unos segundos y vuelve a intentarlo.");
+    return;
+  }
   try {
-    const resp = await msalInstance.loginPopup({ scopes: GRAPH_SCOPES });
-    account = resp.account;
-    showApp();
-  } catch (e) {
-    // fallback a redirect si el popup se bloquea
+    // Redirect es más fiable que popup (no lo bloquea el navegador ni el móvil)
     await msalInstance.loginRedirect({ scopes: GRAPH_SCOPES });
+  } catch (e) {
+    alert("Error al iniciar sesión: " + (e.errorMessage || e.message || e));
   }
 }
 
-function signOut() { msalInstance.logoutPopup({ account }); }
+function signOut() { msalInstance.logoutRedirect({ account }); }
 
 async function getToken() {
   try {
     const r = await msalInstance.acquireTokenSilent({ scopes: GRAPH_SCOPES, account });
     return r.accessToken;
   } catch {
-    const r = await msalInstance.acquireTokenPopup({ scopes: GRAPH_SCOPES });
-    return r.accessToken;
+    // Si hace falta interacción/consentimiento, redirige
+    await msalInstance.acquireTokenRedirect({ scopes: GRAPH_SCOPES, account });
   }
 }
 
