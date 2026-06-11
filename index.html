@@ -80,19 +80,70 @@
   .hidden { display: none !important; }
   video, canvas#preview { width: 100%; border-radius: 8px; background: #000; }
   .camera-controls { display: flex; gap: 12px; margin-top: 12px; justify-content: center; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
-  td input {
-    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 6px; padding: 6px 8px; width: 100%; font-family: inherit; font-size: 13px;
+  /* ---- TARJETAS DE TICKETS ---- */
+  .tkt-list { display: flex; flex-direction: column; gap: 10px; }
+  .tkt-card {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+    transition: border-color .15s;
   }
-  td select {
-    background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 6px; padding: 6px 8px; width: 100%; font-family: inherit; font-size: 13px;
+  .tkt-card:hover { border-color: #3d4f63; }
+  .tkt-top { display: flex; align-items: center; gap: 12px; }
+  .tkt-icon {
+    width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
   }
-  td input[type="date"] { color-scheme: dark; min-width: 130px; }
-  .total-row td { font-weight: 700; font-size: 15px; border-top: 2px solid var(--border); }
+  .tkt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+  .tkt-comercio {
+    background: transparent; border: none; color: var(--text); font-size: 15px;
+    font-weight: 600; width: 100%; padding: 0; font-family: inherit;
+    border-bottom: 1px solid transparent; transition: border-color .15s;
+  }
+  .tkt-comercio:focus { outline: none; border-bottom-color: var(--accent); }
+  .tkt-fecha {
+    background: transparent; border: 1px solid transparent; color: var(--muted);
+    font-size: 13px; border-radius: 6px; padding: 3px 6px; font-family: inherit;
+    color-scheme: dark; transition: border-color .15s; margin-left: -6px;
+  }
+  .tkt-fecha:focus { outline: none; border-color: var(--accent); }
+  .tkt-fecha.fuera-mes { color: #e3b341; border-color: rgba(227,179,65,.4); }
+  .tkt-right { display: flex; align-items: baseline; gap: 3px; flex-shrink: 0; }
+  .tkt-importe {
+    background: transparent; border: none; color: var(--text); font-size: 24px;
+    font-weight: 700; width: 100px; text-align: right; font-family: inherit; padding: 0;
+    border-bottom: 1px solid transparent; transition: border-color .15s;
+  }
+  .tkt-importe:focus { outline: none; border-bottom-color: var(--accent); }
+  .tkt-euro { color: var(--muted); font-size: 14px; font-weight: 600; }
+  .tkt-del {
+    background: transparent; border: none; color: var(--muted); font-size: 16px;
+    padding: 4px 6px; cursor: pointer; border-radius: 6px; flex-shrink: 0; line-height: 1;
+    transition: color .15s, background .15s;
+  }
+  .tkt-del:hover { color: var(--red); background: rgba(218,54,51,.1); }
+  .tkt-bottom {
+    display: flex; gap: 8px; align-items: center; padding-top: 8px;
+    border-top: 1px solid var(--border);
+  }
+  .tkt-select {
+    background: var(--surface); border: 1px solid var(--border); color: var(--muted);
+    border-radius: 8px; padding: 5px 8px; font-family: inherit; font-size: 12px;
+    flex: 1; min-width: 0; cursor: pointer;
+  }
+  .tkt-select:focus { outline: none; border-color: var(--accent); color: var(--text); }
+  .tkt-foto {
+    background: transparent; border: 1px solid var(--border); border-radius: 8px;
+    padding: 5px 8px; font-size: 14px; cursor: pointer; color: var(--muted);
+    flex-shrink: 0; transition: border-color .15s;
+  }
+  .tkt-foto:hover { border-color: var(--accent); }
+  .tkt-total {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 14px; padding: 14px 16px;
+    background: var(--surface-2); border-radius: 12px; border: 1px solid var(--border);
+  }
+  .tkt-total span:first-child { font-size: 12px; color: var(--muted); font-weight: 700; letter-spacing: .06em; }
+  .tkt-total-num { font-size: 26px; font-weight: 700; color: var(--text); }
   .label { font-size: 12px; color: var(--muted); text-transform: uppercase; font-weight: 600; margin-bottom: 8px; display: block; letter-spacing: .03em; }
   .ocr-text { background: var(--surface-2); border-radius: 8px; padding: 12px; font-size: 12px; color: var(--muted); white-space: pre-wrap; max-height: 140px; overflow-y: auto; font-family: monospace; margin-top: 10px; }
   .progress { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-top: 12px; }
@@ -528,66 +579,99 @@ function parseTicket(text) {
   return { fecha, comercio, importe };
 }
 
-// ---- TABLA ----
+// ---- TARJETAS ----
+const CAT_ICONS = {
+  comidas:     { icon: '🍽️', color: '#e8833a' },
+  combustible: { icon: '⛽',  color: '#2f81f7' },
+  tte:         { icon: '🚗',  color: '#a371f7' },
+  rrpp:        { icon: '🤝',  color: '#2ea043' },
+  otros:       { icon: '📎',  color: '#8b98a5' }
+};
+const PAGO_LABELS = { trabajador: 'Trabajador', visa: 'Visa empresa', gasoil: 'T. Gasoil' };
+
 function renderTable() {
   const wrap = document.getElementById('tableWrap');
   document.getElementById('ticketCount').textContent = tickets.length + ' tickets';
   if (!tickets.length) {
-    wrap.innerHTML = '<div class="empty">Aún no hay tickets este mes. Captura uno para empezar.</div>';
+    wrap.innerHTML = '<div class="empty">Aún no hay tickets este mes.<br>Captura uno para empezar.</div>';
     return;
   }
+  // Ordenar por fecha
+  const sorted = tickets.map((t,i) => ({...t, _i: i}))
+    .sort((a,b) => (fechaSerial(a.fecha)||0) - (fechaSerial(b.fecha)||0));
+
   let total = 0;
-  const month = document.getElementById('monthPicker').value;
-  let rows = tickets.map((t, i) => {
-    total += parseFloat(String(t.importe).replace(',','.')) || 0;
-    const opciones = CATEGORIAS.map(c =>
-      `<option value="${c.id}" ${t.categoria===c.id?'selected':''}>${c.label}</option>`
-    ).join('');
-    const opcPago = FORMAS_PAGO.map(p =>
-      `<option value="${p.id}" ${t.formaPago===p.id?'selected':''}>${p.label}</option>`
-    ).join('');
+  tickets.forEach(t => { total += parseFloat(String(t.importe).replace(',','.')) || 0; });
+
+  const cards = sorted.map(t => {
+    const i = t._i;
+    const cat = CAT_ICONS[t.categoria] || CAT_ICONS.otros;
     const fechaInput = aFechaInput(t.fecha) || '';
     const fechaFuera = t.fecha && !fechaEnMesActual(t.fecha);
-    return `<tr>
-      <td><img class="ticket-thumb" src="${t.imageDataUrl}" onclick="window.open().document.write('<img src=\\'${t.imageDataUrl}\\' style=max-width:100%>')"></td>
-      <td><input type="date" value="${fechaInput}" onchange="setFecha(${i},this.value)" style="${fechaFuera?'border-color:#e3b341':''}" title="${fechaFuera?'Fecha fuera del mes seleccionado':''}"></td>
-      <td><input value="${escapeHtml(t.comercio)}" maxlength="40" oninput="this.value=limpiarConcepto(this.value)" onchange="updateTicket(${i},'comercio',limpiarConcepto(this.value))"></td>
-      <td><select onchange="updateTicket(${i},'categoria',this.value)">${opciones}</select></td>
-      <td><select onchange="updateTicket(${i},'formaPago',this.value)">${opcPago}</select></td>
-      <td><input inputmode="decimal" value="${formatearImporte(t.importe)}" style="text-align:right" onchange="setImporte(${i},this.value)"></td>
-      <td><button class="btn-danger" onclick="removeTicket(${i})">✕</button></td>
-    </tr>`;
+    const opciones = CATEGORIAS.map(c =>
+      `<option value="${c.id}" ${t.categoria===c.id?'selected':''}>${c.label}</option>`).join('');
+    const opcPago = FORMAS_PAGO.map(p =>
+      `<option value="${p.id}" ${t.formaPago===p.id?'selected':''}>${p.label}</option>`).join('');
+
+    return `<div class="tkt-card">
+      <div class="tkt-top">
+        <div class="tkt-icon" style="background:${cat.color}22;color:${cat.color}">${cat.icon}</div>
+        <div class="tkt-main">
+          <input class="tkt-comercio" value="${escapeHtml(t.comercio)}" placeholder="Comercio"
+            maxlength="40" oninput="this.value=limpiarConcepto(this.value)"
+            onchange="updateTicket(${i},'comercio',limpiarConcepto(this.value))">
+          <div class="tkt-meta">
+            <input type="date" class="tkt-fecha ${fechaFuera?'fuera-mes':''}" value="${fechaInput}"
+              onchange="setFecha(${i},this.value)"
+              title="${fechaFuera?'⚠️ Fecha fuera del mes seleccionado':''}">
+          </div>
+        </div>
+        <div class="tkt-right">
+          <input class="tkt-importe" inputmode="decimal" value="${formatearImporte(t.importe)}"
+            onchange="setImporte(${i},this.value)">
+          <span class="tkt-euro">€</span>
+        </div>
+        <button class="tkt-del" onclick="removeTicket(${i})" title="Eliminar">✕</button>
+      </div>
+      <div class="tkt-bottom">
+        <select class="tkt-select" onchange="updateTicket(${i},'categoria',this.value)">${opciones}</select>
+        <select class="tkt-select" onchange="updateTicket(${i},'formaPago',this.value)">${opcPago}</select>
+        <button class="tkt-foto" onclick="verFoto('${i}')" title="Ver ticket">🖼</button>
+        <img id="foto-${i}" src="${t.imageDataUrl}" style="display:none">
+      </div>
+    </div>`;
   }).join('');
-  wrap.innerHTML = `<table>
-    <thead><tr><th>Ticket</th><th>Fecha</th><th>Comercio</th><th>Categoría</th><th>Pago</th><th style="text-align:right">Importe €</th><th></th></tr></thead>
-    <tbody>${rows}</tbody>
-    <tfoot><tr class="total-row"><td colspan="5">TOTAL</td><td style="text-align:right">${formatearImporte(total)} €</td><td></td></tr></tfoot>
-  </table>`;
+
+  wrap.innerHTML = `<div class="tkt-list">${cards}</div>
+    <div class="tkt-total">
+      <span>TOTAL MES</span>
+      <span class="tkt-total-num">${formatearImporte(total)} €</span>
+    </div>`;
 }
+
+function verFoto(i) {
+  const img = document.getElementById('foto-'+i);
+  if (!img) return;
+  const w = window.open('', '_blank', 'width=600,height=800');
+  w.document.write(`<img src="${img.src}" style="max-width:100%;display:block;margin:auto">`);
+}
+
 function updateTicket(i, field, val) {
   tickets[i][field] = val;
-  // Al cambiar la categoría, ajustar la forma de pago por defecto (punto 5)
   if (field === 'categoria') {
     tickets[i].formaPago = detectarFormaPago(val);
     renderTable();
   }
 }
 function setFecha(i, val) {
-  // val viene como YYYY-MM-DD del input date
   if (!val) return;
   const [y,m,d] = val.split('-').map(Number);
   tickets[i].fecha = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
-  // Avisar (sin bloquear) si la fecha cae fuera del mes seleccionado
   if (!fechaEnMesActual(val)) {
     setSaveStatus(`⚠️ La fecha de este ticket no es del mes seleccionado, pero se guardará igualmente.`, 'error');
-  } else {
-    setSaveStatus("", '');
-  }
+  } else { setSaveStatus("", ''); }
 }
-function setImporte(i, val) {
-  tickets[i].importe = limpiarImporte(val);
-  renderTable();
-}
+function setImporte(i, val) { tickets[i].importe = limpiarImporte(val); renderTable(); }
 function removeTicket(i) { tickets.splice(i,1); renderTable(); }
 function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
