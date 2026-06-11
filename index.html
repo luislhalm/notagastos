@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Notas de Gastos</title>
-<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root {
@@ -209,6 +209,17 @@ window.addEventListener('load', async () => {
 
   if (CLIENT_ID.startsWith("TU_")) {
     document.getElementById('configWarning').classList.remove('hidden');
+    return;
+  }
+
+  // Esperar a que la librería MSAL esté cargada (puede tardar en redes lentas)
+  let intentos = 0;
+  while (typeof msal === 'undefined' && intentos < 50) {
+    await new Promise(r => setTimeout(r, 100));
+    intentos++;
+  }
+  if (typeof msal === 'undefined') {
+    alert("No se pudo cargar la librería de inicio de sesión (MSAL). Revisa tu conexión a internet y recarga la página con Ctrl+F5.");
     return;
   }
 
