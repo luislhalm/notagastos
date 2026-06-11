@@ -218,12 +218,10 @@ const FORMAS_PAGO = [
   { id: "gasoil",     label: "Tarjeta gasoil",    col: "N" }
 ];
 
-// Detecta forma de pago por el texto OCR (por defecto: trabajador)
-function detectarFormaPago(texto) {
-  const t = (texto || "").toLowerCase();
-  if (/(solred|tarjeta gasoil|gasoil|carburante|repsol via|ruta)/.test(t)) return "gasoil";
-  if (/(visa|mastercard|tarjeta|tarj\.|credito|crédito|contactless|\*{2,}\d{4})/.test(t)) return "visa";
-  return "trabajador";
+// Forma de pago por defecto según la categoría:
+// combustible -> tarjeta gasoil; resto -> visa empresa
+function detectarFormaPago(categoria) {
+  return categoria === "combustible" ? "gasoil" : "visa";
 }
 
 // ---- VALIDACIONES ----
@@ -470,13 +468,14 @@ async function processImage(dataUrl) {
     const parsed = parseTicket(text);
     // Validar fecha del OCR: si no cae en el mes seleccionado, dejar vacía para que el usuario la ponga
     let fechaOk = parsed.fecha && fechaEnMesActual(parsed.fecha) ? parsed.fecha : "";
+    const catDetectada = detectarCategoria(text);
     const ticket = {
       id: Date.now(),
       fecha: fechaOk,
       comercio: limpiarConcepto(parsed.comercio),
       importe: limpiarImporte(parsed.importe),
-      categoria: detectarCategoria(text),
-      formaPago: detectarFormaPago(text),
+      categoria: catDetectada,
+      formaPago: detectarFormaPago(catDetectada),
       texto: text,
       imageDataUrl: dataUrl
     };
@@ -560,7 +559,14 @@ function renderTable() {
     <tfoot><tr class="total-row"><td colspan="5">TOTAL</td><td style="text-align:right">${formatearImporte(total)} €</td><td></td></tr></tfoot>
   </table>`;
 }
-function updateTicket(i, field, val) { tickets[i][field] = val; }
+function updateTicket(i, field, val) {
+  tickets[i][field] = val;
+  // Al cambiar la categoría, ajustar la forma de pago por defecto (punto 5)
+  if (field === 'categoria') {
+    tickets[i].formaPago = detectarFormaPago(val);
+    renderTable();
+  }
+}
 function setFecha(i, val) {
   // val viene como YYYY-MM-DD del input date
   if (!fechaEnMesActual(val)) {
@@ -620,12 +626,19 @@ function fechaSerial(fecha) {
   if (fecha instanceof Date) d = fecha;
   else {
     const s = String(fecha).trim();
-    const m = s.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/);
+    // Formato ISO del input date: YYYY-MM-DD
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
     if (m) {
-      let [_, dd, mm, yy] = m;
-      yy = yy.length === 2 ? '20'+yy : yy;
-      d = new Date(parseInt(yy), parseInt(mm)-1, parseInt(dd));
-    } else return null;
+      d = new Date(parseInt(m[1]), parseInt(m[2])-1, parseInt(m[3]));
+    } else {
+      // Formato español: dd/mm/aaaa o dd-mm-aa
+      m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/);
+      if (m) {
+        let [_, dd, mm, yy] = m;
+        yy = yy.length === 2 ? '20'+yy : yy;
+        d = new Date(parseInt(yy), parseInt(mm)-1, parseInt(dd));
+      } else return null;
+    }
   }
   if (isNaN(d)) return null;
   const epoch = new Date(Date.UTC(1899,11,30));
@@ -718,7 +731,10 @@ async function loadMonth() {
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
     if (res.ok) {
       const data = await res.json();
-      tickets = (data.tickets || []).map(t => ({ ...t, categoria: t.categoria || detectarCategoria(t.texto), formaPago: t.formaPago || detectarFormaPago(t.texto) }));
+      tickets = (data.tickets || []).map(t => {
+        const cat = t.categoria || detectarCategoria(t.texto);
+        return { ...t, categoria: cat, formaPago: t.formaPago || detectarFormaPago(cat) };
+      });
       renderTable();
       setSaveStatus(`Cargados ${tickets.length} tickets guardados de ${month}.`, 'success');
     } else if (res.status === 404) {
