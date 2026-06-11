@@ -88,37 +88,39 @@
     transition: border-color .15s;
   }
   .tkt-card:hover { border-color: #3d4f63; }
-  .tkt-top { display: flex; align-items: center; gap: 12px; }
+  /* Fila 1: icono + comercio (full width) + borrar */
+  .tkt-top { display: flex; align-items: center; gap: 10px; }
   .tkt-icon {
-    width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 20px;
   }
-  .tkt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
   .tkt-comercio {
-    background: transparent; border: none; color: var(--text); font-size: 15px;
-    font-weight: 600; width: 100%; padding: 0; font-family: inherit;
+    background: transparent; border: none; color: var(--text); font-size: 16px;
+    font-weight: 600; flex: 1; min-width: 0; padding: 0; font-family: inherit;
     border-bottom: 1px solid transparent; transition: border-color .15s;
   }
   .tkt-comercio:focus { outline: none; border-bottom-color: var(--accent); }
-  .tkt-fecha {
-    background: transparent; border: 1px solid transparent; color: var(--muted);
-    font-size: 13px; border-radius: 6px; padding: 3px 6px; font-family: inherit;
-    color-scheme: dark; transition: border-color .15s; margin-left: -6px;
-  }
-  .tkt-fecha:focus { outline: none; border-color: var(--accent); }
-  .tkt-fecha.fuera-mes { color: #e3b341; border-color: rgba(227,179,65,.4); }
-  .tkt-right { display: flex; align-items: baseline; gap: 3px; flex-shrink: 0; }
+  /* Fila 2: importe grande a la izquierda + fecha a la derecha */
+  .tkt-mid { display: flex; align-items: baseline; justify-content: space-between; }
+  .tkt-importe-row { display: flex; align-items: baseline; gap: 4px; }
   .tkt-importe {
-    background: transparent; border: none; color: var(--text); font-size: 24px;
-    font-weight: 700; width: 100px; text-align: right; font-family: inherit; padding: 0;
+    background: transparent; border: none; color: var(--text); font-size: 28px;
+    font-weight: 700; width: 150px; text-align: left; font-family: inherit; padding: 0;
     border-bottom: 1px solid transparent; transition: border-color .15s;
   }
   .tkt-importe:focus { outline: none; border-bottom-color: var(--accent); }
-  .tkt-euro { color: var(--muted); font-size: 14px; font-weight: 600; }
+  .tkt-euro { color: var(--muted); font-size: 15px; font-weight: 600; }
+  .tkt-fecha {
+    background: transparent; border: 1px solid transparent; color: var(--muted);
+    font-size: 13px; border-radius: 6px; padding: 4px 6px; font-family: inherit;
+    color-scheme: dark; transition: border-color .15s; text-align: right;
+  }
+  .tkt-fecha:focus { outline: none; border-color: var(--accent); }
+  .tkt-fecha.fuera-mes { color: #e3b341; }
   .tkt-del {
     background: transparent; border: none; color: var(--muted); font-size: 16px;
     padding: 4px 6px; cursor: pointer; border-radius: 6px; flex-shrink: 0; line-height: 1;
-    transition: color .15s, background .15s;
+    transition: color .15s, background .15s; margin-left: 4px;
   }
   .tkt-del:hover { color: var(--red); background: rgba(218,54,51,.1); }
   .tkt-bottom {
@@ -616,22 +618,20 @@ function renderTable() {
     return `<div class="tkt-card">
       <div class="tkt-top">
         <div class="tkt-icon" style="background:${cat.color}22;color:${cat.color}">${cat.icon}</div>
-        <div class="tkt-main">
-          <input class="tkt-comercio" value="${escapeHtml(t.comercio)}" placeholder="Comercio"
-            maxlength="40" oninput="this.value=limpiarConcepto(this.value)"
-            onchange="updateTicket(${i},'comercio',limpiarConcepto(this.value))">
-          <div class="tkt-meta">
-            <input type="date" class="tkt-fecha ${fechaFuera?'fuera-mes':''}" value="${fechaInput}"
-              onchange="setFecha(${i},this.value)"
-              title="${fechaFuera?'⚠️ Fecha fuera del mes seleccionado':''}">
-          </div>
-        </div>
-        <div class="tkt-right">
+        <input class="tkt-comercio" value="${escapeHtml(t.comercio)}" placeholder="Comercio"
+          maxlength="40" oninput="this.value=limpiarConcepto(this.value)"
+          onchange="updateTicket(${i},'comercio',limpiarConcepto(this.value))">
+        <button class="tkt-del" onclick="removeTicket(${i})" title="Eliminar">✕</button>
+      </div>
+      <div class="tkt-mid">
+        <div class="tkt-importe-row">
           <input class="tkt-importe" inputmode="decimal" value="${formatearImporte(t.importe)}"
             onchange="setImporte(${i},this.value)">
           <span class="tkt-euro">€</span>
         </div>
-        <button class="tkt-del" onclick="removeTicket(${i})" title="Eliminar">✕</button>
+        <input type="date" class="tkt-fecha ${fechaFuera?'fuera-mes':''}" value="${fechaInput}"
+          onchange="setFecha(${i},this.value)"
+          title="${fechaFuera?'⚠️ Fecha fuera del mes seleccionado':''}">
       </div>
       <div class="tkt-bottom">
         <select class="tkt-select" onchange="updateTicket(${i},'categoria',this.value)">${opciones}</select>
