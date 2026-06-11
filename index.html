@@ -102,6 +102,7 @@
   .status.error { color: var(--red); }
   .month-selector { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   .month-selector input { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 9px 12px; font-family: inherit; font-size: 14px; }
+  .mes-aviso { background: rgba(210,153,34,.12); border: 1px solid rgba(210,153,34,.4); color: #e3b341; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
   .ticket-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; cursor: pointer; }
   .empty { text-align: center; color: var(--muted); padding: 30px; font-size: 14px; }
   .badge { background: var(--surface-2); padding: 3px 9px; border-radius: 20px; font-size: 12px; color: var(--muted); }
@@ -137,6 +138,7 @@
       <input type="month" id="monthPicker">
       <span class="badge" id="ticketCount">0 tickets</span>
     </div>
+    <div id="mesPasadoAviso" class="mes-aviso hidden"></div>
 
     <!-- ACCIONES -->
     <div class="card">
@@ -466,12 +468,13 @@ async function processImage(dataUrl) {
     });
     const text = data.text;
     const parsed = parseTicket(text);
-    // Validar fecha del OCR: si no cae en el mes seleccionado, dejar vacía para que el usuario la ponga
-    let fechaOk = parsed.fecha && fechaEnMesActual(parsed.fecha) ? parsed.fecha : "";
+    // Conservar la fecha detectada por el OCR (aunque sea de otro mes)
+    let fechaDetectada = parsed.fecha || "";
+    let fueraDeMes = fechaDetectada && !fechaEnMesActual(fechaDetectada);
     const catDetectada = detectarCategoria(text);
     const ticket = {
       id: Date.now(),
-      fecha: fechaOk,
+      fecha: fechaDetectada,
       comercio: limpiarConcepto(parsed.comercio),
       importe: limpiarImporte(parsed.importe),
       categoria: catDetectada,
@@ -481,6 +484,10 @@ async function processImage(dataUrl) {
     };
     tickets.push(ticket);
     renderTable();
+
+    if (fueraDeMes) {
+      setSaveStatus(`⚠️ Este ticket (${fechaDetectada}) no es del mes seleccionado, pero se ha añadido igual. Revísalo si no es lo que querías.`, 'error');
+    }
 
     document.getElementById('ocrStatus').textContent = "✓ Ticket añadido. Revisa los datos en la tabla.";
     document.getElementById('ocrStatus').className = "status success";
@@ -531,9 +538,6 @@ function renderTable() {
   }
   let total = 0;
   const month = document.getElementById('monthPicker').value;
-  const [yy, mm] = (month || '').split('-').map(Number);
-  const minFecha = month ? `${month}-01` : '';
-  const maxFecha = month ? `${yy}-${String(mm).padStart(2,'0')}-${String(new Date(yy, mm, 0).getDate()).padStart(2,'0')}` : '';
   let rows = tickets.map((t, i) => {
     total += parseFloat(String(t.importe).replace(',','.')) || 0;
     const opciones = CATEGORIAS.map(c =>
@@ -542,10 +546,11 @@ function renderTable() {
     const opcPago = FORMAS_PAGO.map(p =>
       `<option value="${p.id}" ${t.formaPago===p.id?'selected':''}>${p.label}</option>`
     ).join('');
-    const fechaInput = aFechaInput(t.fecha) || (month ? minFecha : '');
+    const fechaInput = aFechaInput(t.fecha) || '';
+    const fechaFuera = t.fecha && !fechaEnMesActual(t.fecha);
     return `<tr>
       <td><img class="ticket-thumb" src="${t.imageDataUrl}" onclick="window.open().document.write('<img src=\\'${t.imageDataUrl}\\' style=max-width:100%>')"></td>
-      <td><input type="date" value="${fechaInput}" min="${minFecha}" max="${maxFecha}" onchange="setFecha(${i},this.value)"></td>
+      <td><input type="date" value="${fechaInput}" onchange="setFecha(${i},this.value)" style="${fechaFuera?'border-color:#e3b341':''}" title="${fechaFuera?'Fecha fuera del mes seleccionado':''}"></td>
       <td><input value="${escapeHtml(t.comercio)}" maxlength="40" oninput="this.value=limpiarConcepto(this.value)" onchange="updateTicket(${i},'comercio',limpiarConcepto(this.value))"></td>
       <td><select onchange="updateTicket(${i},'categoria',this.value)">${opciones}</select></td>
       <td><select onchange="updateTicket(${i},'formaPago',this.value)">${opcPago}</select></td>
@@ -569,13 +574,15 @@ function updateTicket(i, field, val) {
 }
 function setFecha(i, val) {
   // val viene como YYYY-MM-DD del input date
-  if (!fechaEnMesActual(val)) {
-    setSaveStatus("La fecha debe estar dentro del mes seleccionado.", 'error');
-    renderTable();
-    return;
-  }
+  if (!val) return;
   const [y,m,d] = val.split('-').map(Number);
   tickets[i].fecha = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
+  // Avisar (sin bloquear) si la fecha cae fuera del mes seleccionado
+  if (!fechaEnMesActual(val)) {
+    setSaveStatus(`⚠️ La fecha de este ticket no es del mes seleccionado, pero se guardará igualmente.`, 'error');
+  } else {
+    setSaveStatus("", '');
+  }
 }
 function setImporte(i, val) {
   tickets[i].importe = limpiarImporte(val);
@@ -596,25 +603,34 @@ async function generateAndSave() {
     const month = document.getElementById('monthPicker').value; // YYYY-MM
     const folderPath = `${FOLDER_NAME}/${month}`;
 
-    setSaveStatus("Generando Excel de la nota...", '');
-
-    // 1. Generar el Excel rellenando tu plantilla (conserva formato y fórmulas)
-    const xlsxBlob = await buildExcel(month);
-    await uploadFile(`${folderPath}/nota-gastos-${month}.xlsx`, xlsxBlob);
-
-    // 2. Guardar datos.json (incluye imágenes) para recuperar el mes al volver a entrar
+    // 1. Guardar primero los datos (datos.json e imágenes): nunca se bloquean
+    setSaveStatus("Guardando datos y tickets...", '');
     const datos = JSON.stringify({ month, tickets });
     await uploadFile(`${folderPath}/datos.json`, new Blob([datos], {type:'application/json'}));
-
-    // 3. Subir cada imagen de ticket
-    setSaveStatus("Subiendo imágenes de tickets...", '');
     for (let i = 0; i < tickets.length; i++) {
       const blob = dataURLtoBlob(tickets[i].imageDataUrl);
       await uploadFile(`${folderPath}/tickets/ticket-${i+1}-${tickets[i].id}.jpg`, blob);
     }
+
+    // 2. Generar y subir el Excel. Si está abierto en Excel, dará bloqueo (423)
+    setSaveStatus("Generando Excel de la nota...", '');
+    const xlsxBlob = await buildExcel(month);
+    try {
+      await uploadFile(`${folderPath}/nota-gastos-${month}.xlsx`, xlsxBlob);
+    } catch (e) {
+      if (e.locked) {
+        setSaveStatus(`✓ Tus tickets se han guardado, pero el Excel está abierto ahora mismo. Ciérralo (en Excel/OneDrive) y pulsa de nuevo "Generar y guardar" para actualizarlo.`, 'error');
+        return;
+      }
+      throw e;
+    }
     setSaveStatus(`✓ Nota Excel guardada en OneDrive › ${folderPath} (${tickets.length} tickets)`, 'success');
   } catch (e) {
-    setSaveStatus("Error al guardar: " + e.message, 'error');
+    if (e.locked) {
+      setSaveStatus(`El archivo está abierto y bloqueado. Ciérralo y vuelve a intentarlo.`, 'error');
+    } else {
+      setSaveStatus("Error al guardar: " + e.message, 'error');
+    }
   } finally {
     btn.disabled = false;
   }
@@ -720,8 +736,30 @@ function setCellValue(xml, ref, value, esTexto) {
 }
 
 // Carga los tickets ya guardados del mes seleccionado desde OneDrive
+// Muestra/oculta el aviso si el mes seleccionado no es el actual
+function mesActualStr() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+}
+function nombreMes(month) {
+  if (!month) return '';
+  const [y,m] = month.split('-').map(Number);
+  return new Date(y, m-1, 1).toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+}
+function actualizarAvisoMes() {
+  const month = document.getElementById('monthPicker').value;
+  const aviso = document.getElementById('mesPasadoAviso');
+  if (month && month !== mesActualStr()) {
+    aviso.innerHTML = `⚠️ Estás trabajando en una nota de un mes anterior: <strong style="margin-left:4px">${nombreMes(month)}</strong>`;
+    aviso.classList.remove('hidden');
+  } else {
+    aviso.classList.add('hidden');
+  }
+}
+
 async function loadMonth() {
   const month = document.getElementById('monthPicker').value;
+  actualizarAvisoMes();
   if (!month || !account) return;
   try {
     setSaveStatus("Cargando tickets guardados del mes...", '');
@@ -757,6 +795,11 @@ async function uploadFile(path, blob) {
     headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': blob.type || 'application/octet-stream' },
     body: blob
   });
+  if (res.status === 423) {
+    const err = new Error('locked');
+    err.locked = true;
+    throw err;
+  }
   if (!res.ok) throw new Error(`Graph ${res.status}: ${await res.text()}`);
   return res.json();
 }
