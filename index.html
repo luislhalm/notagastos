@@ -100,7 +100,7 @@
     border-bottom: 1px solid transparent; transition: border-color .15s;
   }
   .tkt-comercio:focus { outline: none; border-bottom-color: var(--accent); }
-  /* Fila 2: importe grande a la izquierda + fecha a la derecha */
+  /* Fila 2: fecha a la izquierda + importe grande a la derecha */
   .tkt-mid { display: flex; align-items: baseline; justify-content: space-between; }
   .tkt-importe-row { display: flex; align-items: baseline; gap: 4px; }
   .tkt-importe {
@@ -624,14 +624,14 @@ function renderTable() {
         <button class="tkt-del" onclick="removeTicket(${i})" title="Eliminar">✕</button>
       </div>
       <div class="tkt-mid">
+        <input type="date" class="tkt-fecha ${fechaFuera?'fuera-mes':''}" value="${fechaInput}"
+          onchange="setFecha(${i},this.value)"
+          title="${fechaFuera?'⚠️ Fecha fuera del mes seleccionado':''}">
         <div class="tkt-importe-row">
           <input class="tkt-importe" inputmode="decimal" value="${formatearImporte(t.importe)}"
             onchange="setImporte(${i},this.value)">
           <span class="tkt-euro">€</span>
         </div>
-        <input type="date" class="tkt-fecha ${fechaFuera?'fuera-mes':''}" value="${fechaInput}"
-          onchange="setFecha(${i},this.value)"
-          title="${fechaFuera?'⚠️ Fecha fuera del mes seleccionado':''}">
       </div>
       <div class="tkt-bottom">
         <select class="tkt-select" onchange="updateTicket(${i},'categoria',this.value)">${opciones}</select>
