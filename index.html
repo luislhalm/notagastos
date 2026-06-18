@@ -268,7 +268,6 @@
     <!-- VALIDACIÓN DEL TICKET (antes de añadirlo) -->
     <div class="card hidden" id="validateCard">
       <span class="label">Verificar datos del ticket</span>
-      <canvas id="validatePreview"></canvas>
       <div class="val-form">
         <div class="val-row">
           <label>Fecha</label>
@@ -290,13 +289,14 @@
           <label>Forma de pago</label>
           <select id="valPago"></select>
         </div>
-        <div class="ocr-text hidden" id="ocrText"></div>
         <div class="val-actions">
           <button class="btn-primary" onclick="confirmarTicket()">✓ Añadir ticket</button>
           <button class="btn-secondary" onclick="descartarTicket()">✕ Descartar</button>
           <button class="btn-secondary" style="margin-left:auto;font-size:12px" onclick="document.getElementById('ocrText').classList.toggle('hidden')">Ver OCR</button>
         </div>
       </div>
+      <canvas id="validatePreview" style="margin-top:12px"></canvas>
+      <div class="ocr-text hidden" id="ocrText"></div>
     </div>
 
     <!-- TABLA -->
@@ -685,9 +685,9 @@ function confirmarTicket() {
 
   const fueraDeMes = lastTicket.fecha && !fechaEnMesActual(lastTicket.fecha);
   if (fueraDeMes) {
-    setSaveStatus(`⚠️ Este ticket no es del mes seleccionado, pero se ha añadido igual.`, 'error');
+    setSaveStatus(`⚠️ Ticket #${lastTicket.num} añadido (fecha fuera del mes). Pulsa "Guardar borrador" para subirlo a OneDrive.`, 'error');
   } else {
-    setSaveStatus(`✓ Ticket #${lastTicket.num} añadido correctamente.`, 'success');
+    setSaveStatus(`✓ Ticket #${lastTicket.num} añadido. Pulsa "Guardar borrador" para subirlo a OneDrive.`, 'success');
   }
 }
 
@@ -744,9 +744,9 @@ function renderTable() {
   }
   const cerrada = notaEstado === 'cerrada';
   const dis = cerrada ? 'disabled' : '';
-  // Ordenar por número
+  // Ordenar por fecha (el número se mantiene para identificar cada ticket)
   const sorted = tickets.map((t,i) => ({...t, _i: i}))
-    .sort((a,b) => (a.num||0) - (b.num||0));
+    .sort((a,b) => (fechaSerial(a.fecha)||0) - (fechaSerial(b.fecha)||0));
 
   let total = 0;
   tickets.forEach(t => { total += parseFloat(String(t.importe).replace(',','.')) || 0; });
@@ -893,10 +893,11 @@ async function generateAndSave() {
     const folderPath = `${FOLDER_NAME}/${month}`;
 
     // 1. Guardar primero los datos (datos.json e imágenes): nunca se bloquean
-    setSaveStatus("Guardando datos y tickets...", '');
+    setSaveStatus("Guardando datos...", '');
     const datos = JSON.stringify({ month, tickets, estado: notaEstado });
     await uploadFile(`${folderPath}/datos.json`, new Blob([datos], {type:'application/json'}));
     for (let i = 0; i < tickets.length; i++) {
+      setSaveStatus(`Subiendo ticket ${i+1} de ${tickets.length}...`, '');
       const t = tickets[i];
       const blob = dataURLtoBlob(t.imageDataUrl);
       const numStr = String(t.num || i+1).padStart(2, '0');
@@ -915,7 +916,7 @@ async function generateAndSave() {
       }
       throw e;
     }
-    setSaveStatus(`✓ Nota Excel guardada en OneDrive › ${folderPath} (${tickets.length} tickets)`, 'success');
+    setSaveStatus(`✓ Guardado en OneDrive › ${folderPath} (${tickets.length} tickets + imágenes)`, 'success');
   } catch (e) {
     if (e.locked) {
       setSaveStatus(`El archivo está abierto y bloqueado. Ciérralo y vuelve a intentarlo.`, 'error');
