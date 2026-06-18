@@ -903,18 +903,18 @@ async function cerrarNota() {
     const pdfSize = (pdfBlob.size / 1024).toFixed(0);
     console.log(`PDF generado: ${pdfSize} KB`);
 
-    // 4. Subir PDF a OneDrive
-    statusEl.textContent = 'Subiendo PDF a OneDrive...';
+    // 4. Subir PDF a SharePoint (carpeta por empleado/mes)
+    statusEl.textContent = 'Subiendo PDF a SharePoint...';
     const mes = document.getElementById('monthPicker').value;
-    const folderPath = `${FOLDER_NAME}/${mes}`;
-    const pdfName = `nota-gastos-${mes}.pdf`;
-    await uploadFile(`${folderPath}/${pdfName}`, pdfBlob);
+    const emailUser = (account.userPrincipalName || account.username).replace('@', '_at_');
+    const spPath = `${emailUser}/${mes}/nota-gastos-${mes}.pdf`;
+    const pdfUrl = await uploadToSharePoint(spPath, pdfBlob);
 
-    // 5. Escribir en SharePoint
+    // 5. Escribir en SharePoint con la URL del PDF
     statusEl.textContent = 'Registrando en SharePoint...';
-    await escribirEnRegistro(mes, 'Cerrada');
+    await escribirEnRegistro(mes, 'Cerrada', pdfUrl);
 
-    statusEl.textContent = `✓ Nota cerrada. PDF (${pdfSize} KB) guardado. Aprobadores: ${aprobadores.responsable1 || 'ninguno'}${aprobadores.responsable2 ? ' → ' + aprobadores.responsable2 : ''}`;
+    statusEl.textContent = `✓ Nota cerrada. PDF (${pdfSize} KB) en SharePoint. Aprobadores: ${aprobadores.responsable1 || 'ninguno'}${aprobadores.responsable2 ? ' → ' + aprobadores.responsable2 : ''}`;
     statusEl.className = 'status success';
   } catch (e) {
     statusEl.textContent = 'Error al cerrar: ' + e.message;
@@ -1418,6 +1418,26 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
     throw new Error(`SharePoint error ${res.status}: ${errText.slice(0,300)}`);
   }
   return (await res.json()).id;
+}
+
+// Sube un archivo a la biblioteca de documentos del sitio SharePoint
+async function uploadToSharePoint(filePath, blob) {
+  const url = `${SP_GRAPH_BASE}/drive/root:/${filePath}:/content`;
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': blob.type || 'application/octet-stream'
+    },
+    body: blob
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`SharePoint upload error ${res.status}: ${errText.slice(0,200)}`);
+  }
+  const data = await res.json();
+  console.log('Archivo subido a SharePoint:', data.webUrl);
+  return data.webUrl; // URL pública del archivo
 }
 
 async function uploadFile(path, blob) {
