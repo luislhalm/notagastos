@@ -925,13 +925,22 @@ async function cerrarNota() {
 }
 
 async function abrirNota() {
-  if (!confirm('¿Reabrir la nota para editarla? Se detendrá el flujo de aprobación si estaba en curso.')) return;
+  if (!confirm('¿Reabrir la nota para editarla? Se borrará el registro de cierre en SharePoint.')) return;
+  const statusEl = document.getElementById('cerrarStatus');
   notaEstado = 'abierta';
-  document.getElementById('cerrarStatus').textContent = 'Nota reabierta. Puedes editar y volver a cerrar cuando esté lista.';
-  document.getElementById('cerrarStatus').className = 'status success';
   try {
+    accessToken = await getToken();
+    statusEl.textContent = 'Borrando registro de SharePoint...';
+    statusEl.className = 'status';
+    const mes = document.getElementById('monthPicker').value;
+    await borrarRegistro(mes);
     await generateAndSave();
-  } catch (e) { /* ignorar errores al reabrir, ya se guardará cuando cierre */ }
+    statusEl.textContent = '✓ Nota reabierta. Registro borrado de SharePoint. Puedes editar y volver a cerrar.';
+    statusEl.className = 'status success';
+  } catch (e) {
+    statusEl.textContent = 'Nota reabierta (error al borrar registro: ' + e.message + ')';
+    statusEl.className = 'status error';
+  }
   actualizarEstadoUI();
 }
 
@@ -1385,44 +1394,101 @@ async function getAprobadores(email) {
 }
 
 // Escribe en la lista de Registro Notas cuando se cierra una nota
-async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', motivo = '') {
-  // Primero: leer los campos disponibles para diagnóstico
-  const readUrl = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/columns`;
-  const readRes = await fetch(readUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-  if (readRes.ok) {
-    const cols = await readRes.json();
-    const nombres = cols.value.map(c => `${c.displayName} → ${c.name}`);
-    console.log('Columnas en Registro Notas:', nombres);
-  }
-
-  const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items`;
-  const body = {
-    fields: {
-      Title: `${account.name} - ${mes}`,
-      EmailEmpleado: account.userPrincipalName,
-      Mes: mes,
-      Estado: estado,
-      PDFUrl: pdfUrl,
-      ApprovalUrl: approvalUrl,
-      MotivoRechazo: motivo
-    }
-  };
-  console.log('Enviando a SharePoint:', JSON.stringify(body.fields, null, 2));
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+// Busca un registro existente en la lista para este empleado+mes
+async function buscarRegistro(mes) {
+  const email = (account.userPrincipalName || account.username).toLowerCase();
+  const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items?$expand=fields&$filter=fields/Mes eq '${mes}'&$top=50`;
+  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+  if (!res.ok) return null;
+  const data = await res.json();
+  // Buscar la fila de este empleado
+  const item = data.value.find(v => {
+    const e = v.fields.EmailEmpleado || '';
+    return e.toLowerCase() === email;
   });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`SharePoint error ${res.status}: ${errText.slice(0,300)}`);
+  return item ? item.id : null;
+}
+
+// Escribe o actualiza en la lista de Registro Notas
+async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', motivo = '') {
+  const fields = {
+    Title: `${account.name} - ${mes}`,
+    EmailEmpleado: account.userPrincipalName,
+    Mes: mes,
+    Estado: estado,
+    PDFUrl: pdfUrl,
+    ApprovalUrl: approvalUrl,
+    MotivoRechazo: motivo
+  };
+
+  // Buscar si ya existe un registro para este empleado+mes
+  const existingId = await buscarRegistro(mes);
+
+  if (existingId) {
+    // Actualizar fila existente
+    const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existingId}/fields`;
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(fields)
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`SharePoint update error ${res.status}: ${errText.slice(0,200)}`);
+    }
+    console.log('Registro actualizado en SharePoint (id:', existingId, ')');
+    return existingId;
+  } else {
+    // Crear nueva fila
+    const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`SharePoint create error ${res.status}: ${errText.slice(0,200)}`);
+    }
+    const data = await res.json();
+    console.log('Registro creado en SharePoint (id:', data.id, ')');
+    return data.id;
   }
-  return (await res.json()).id;
+}
+
+// Borra el registro de la lista cuando se reabre la nota
+async function borrarRegistro(mes) {
+  try {
+    const existingId = await buscarRegistro(mes);
+    if (existingId) {
+      const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existingId}`;
+      await fetch(url, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      console.log('Registro borrado de SharePoint (id:', existingId, ')');
+    }
+  } catch (e) {
+    console.warn('No se pudo borrar el registro:', e.message);
+  }
 }
 
 // Sube un archivo a la biblioteca de documentos del sitio SharePoint
+let spDriveId = null;
+async function getSharePointDriveId() {
+  if (spDriveId) return spDriveId;
+  const url = `${SP_GRAPH_BASE}/drive`;
+  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error('No se pudo obtener el drive de SharePoint: ' + res.status);
+  const data = await res.json();
+  spDriveId = data.id;
+  console.log('SharePoint drive ID:', spDriveId);
+  return spDriveId;
+}
+
 async function uploadToSharePoint(filePath, blob) {
-  const url = `${SP_GRAPH_BASE}/drive/root:/${filePath}:/content`;
+  const driveId = await getSharePointDriveId();
+  const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${filePath}:/content`;
   const res = await fetch(url, {
     method: 'PUT',
     headers: {
@@ -1437,7 +1503,7 @@ async function uploadToSharePoint(filePath, blob) {
   }
   const data = await res.json();
   console.log('Archivo subido a SharePoint:', data.webUrl);
-  return data.webUrl; // URL pública del archivo
+  return data.webUrl;
 }
 
 async function uploadFile(path, blob) {
