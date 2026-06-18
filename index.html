@@ -7,6 +7,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
 <style>
   :root {
     --bg: #0f1419;
@@ -896,12 +897,24 @@ async function cerrarNota() {
     statusEl.textContent = 'Guardando en OneDrive...';
     await generateAndSave();
 
-    // 3. Escribir en SharePoint
-    statusEl.textContent = 'Registrando en SharePoint...';
+    // 3. Generar PDF optimizado
+    statusEl.textContent = 'Generando PDF...';
+    const pdfBlob = await generatePDF();
+    const pdfSize = (pdfBlob.size / 1024).toFixed(0);
+    console.log(`PDF generado: ${pdfSize} KB`);
+
+    // 4. Subir PDF a OneDrive
+    statusEl.textContent = 'Subiendo PDF a OneDrive...';
     const mes = document.getElementById('monthPicker').value;
+    const folderPath = `${FOLDER_NAME}/${mes}`;
+    const pdfName = `nota-gastos-${mes}.pdf`;
+    await uploadFile(`${folderPath}/${pdfName}`, pdfBlob);
+
+    // 5. Escribir en SharePoint
+    statusEl.textContent = 'Registrando en SharePoint...';
     await escribirEnRegistro(mes, 'Cerrada');
 
-    statusEl.textContent = `✓ Nota cerrada. Guardada en OneDrive y registrada en SharePoint. Aprobadores: ${aprobadores.responsable1 || 'ninguno'}${aprobadores.responsable2 ? ' → ' + aprobadores.responsable2 : ''}`;
+    statusEl.textContent = `✓ Nota cerrada. PDF (${pdfSize} KB) guardado. Aprobadores: ${aprobadores.responsable1 || 'ninguno'}${aprobadores.responsable2 ? ' → ' + aprobadores.responsable2 : ''}`;
     statusEl.className = 'status success';
   } catch (e) {
     statusEl.textContent = 'Error al cerrar: ' + e.message;
@@ -920,6 +933,183 @@ async function abrirNota() {
     await generateAndSave();
   } catch (e) { /* ignorar errores al reabrir, ya se guardará cuando cierre */ }
   actualizarEstadoUI();
+}
+
+// ---- GENERAR PDF OPTIMIZADO ----
+// Comprime una imagen dataURL a un tamaño y calidad menores para el PDF
+function comprimirImagen(dataUrl, maxW = 600, quality = 0.5) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxW / img.width);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve({ dataUrl: c.toDataURL('image/jpeg', quality), w, h });
+    };
+    img.src = dataUrl;
+  });
+}
+
+async function generatePDF() {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pw = 210, ph = 297; // A4 en mm
+  const margin = 15;
+  const usableW = pw - margin * 2;
+
+  // Ordenar tickets por fecha
+  const sorted = [...tickets].sort((a, b) => (fechaSerial(a.fecha) || 0) - (fechaSerial(b.fecha) || 0));
+  const mes = document.getElementById('monthPicker').value;
+  const nombreMes = new Date(mes + '-01').toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+
+  // ---- PÁGINA 1: RESUMEN ----
+  let y = margin;
+
+  // Cabecera
+  doc.setFontSize(16);
+  doc.setFont('helvetica', 'bold');
+  doc.text('NOTA DE GASTOS', margin, y);
+  y += 8;
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Empleado: ${account.name}`, margin, y);
+  doc.text(`Mes: ${nombreMes}`, pw / 2, y);
+  y += 5;
+  doc.text(`Fecha: ${new Date().toLocaleDateString('es-ES')}`, margin, y);
+  doc.text(`Tickets: ${sorted.length}`, pw / 2, y);
+  y += 8;
+
+  // Línea separadora
+  doc.setDrawColor(100);
+  doc.line(margin, y, pw - margin, y);
+  y += 4;
+
+  // Tabla resumen
+  const colWidths = [10, 22, 50, 30, 25, 30]; // #, Fecha, Detalle, Categoría, Importe, Pago
+  const headers = ['#', 'Fecha', 'Detalle', 'Categoría', 'Importe', 'Forma pago'];
+
+  // Cabecera de tabla
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.setFillColor(240, 240, 240);
+  doc.rect(margin, y - 3, usableW, 6, 'F');
+  let x = margin;
+  headers.forEach((h, i) => {
+    doc.text(h, x + 1, y);
+    x += colWidths[i];
+  });
+  y += 5;
+
+  // Filas
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  let totalGasto = 0;
+  const totCat = {};
+  const totPago = {};
+
+  sorted.forEach(t => {
+    if (y > ph - 30) {
+      doc.addPage();
+      y = margin;
+    }
+    const imp = parseFloat(String(t.importe).replace(',', '.')) || 0;
+    totalGasto += imp;
+    const catLabel = CATEGORIAS.find(c => c.id === t.categoria)?.label || t.categoria;
+    const pagoLabel = FORMAS_PAGO.find(p => p.id === t.formaPago)?.label || t.formaPago;
+    totCat[catLabel] = (totCat[catLabel] || 0) + imp;
+    totPago[pagoLabel] = (totPago[pagoLabel] || 0) + imp;
+
+    x = margin;
+    const row = [
+      String(t.num || ''),
+      t.fecha || '',
+      (t.detalle || catLabel).slice(0, 30),
+      catLabel,
+      imp.toFixed(2) + ' €',
+      pagoLabel
+    ];
+    // Línea alterna
+    if (sorted.indexOf(t) % 2 === 0) {
+      doc.setFillColor(250, 250, 250);
+      doc.rect(margin, y - 3, usableW, 5, 'F');
+    }
+    row.forEach((val, i) => {
+      if (i === 4) { // Importe alineado a la derecha
+        doc.text(val, x + colWidths[i] - 2, y, { align: 'right' });
+      } else {
+        doc.text(val, x + 1, y);
+      }
+      x += colWidths[i];
+    });
+    y += 5;
+  });
+
+  // Línea total
+  y += 2;
+  doc.line(margin, y, pw - margin, y);
+  y += 5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('TOTAL:', margin, y);
+  doc.text(totalGasto.toFixed(2) + ' €', margin + colWidths[0] + colWidths[1] + colWidths[2] + colWidths[3] + colWidths[4] - 2, y, { align: 'right' });
+  y += 8;
+
+  // Resumen por categoría
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Resumen por categoría:', margin, y);
+  y += 4;
+  doc.setFont('helvetica', 'normal');
+  Object.entries(totCat).forEach(([cat, val]) => {
+    doc.text(`${cat}: ${val.toFixed(2)} €`, margin + 5, y);
+    y += 4;
+  });
+  y += 4;
+
+  // Resumen por forma de pago
+  doc.setFont('helvetica', 'bold');
+  doc.text('Resumen por forma de pago:', margin, y);
+  y += 4;
+  doc.setFont('helvetica', 'normal');
+  Object.entries(totPago).forEach(([pago, val]) => {
+    doc.text(`${pago}: ${val.toFixed(2)} €`, margin + 5, y);
+    y += 4;
+  });
+
+  // ---- PÁGINAS DE TICKETS ----
+  for (let i = 0; i < sorted.length; i++) {
+    const t = sorted[i];
+    if (!t.imageDataUrl) continue;
+
+    doc.addPage();
+    y = margin;
+
+    // Título del ticket
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    const catLabel = CATEGORIAS.find(c => c.id === t.categoria)?.label || '';
+    doc.text(`Ticket #${t.num || i + 1} — ${t.fecha || 'Sin fecha'} — ${t.detalle || catLabel} — ${formatearImporte(t.importe)} €`, margin, y);
+    y += 8;
+
+    // Comprimir e insertar imagen
+    try {
+      const comp = await comprimirImagen(t.imageDataUrl, 800, 0.5);
+      const imgRatio = comp.h / comp.w;
+      const imgW = Math.min(usableW, 160);
+      const imgH = imgW * imgRatio;
+      const maxH = ph - y - margin;
+      const finalW = imgH > maxH ? (maxH / imgRatio) : imgW;
+      const finalH = finalW * imgRatio;
+      doc.addImage(comp.dataUrl, 'JPEG', margin, y, finalW, finalH);
+    } catch (e) {
+      doc.text('(Error al cargar imagen del ticket)', margin, y);
+    }
+  }
+
+  return doc.output('blob');
 }
 
 // ---- GENERAR Y GUARDAR EN ONEDRIVE/SHAREPOINT ----
@@ -1196,6 +1386,15 @@ async function getAprobadores(email) {
 
 // Escribe en la lista de Registro Notas cuando se cierra una nota
 async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', motivo = '') {
+  // Primero: leer los campos disponibles para diagnóstico
+  const readUrl = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/columns`;
+  const readRes = await fetch(readUrl, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+  if (readRes.ok) {
+    const cols = await readRes.json();
+    const nombres = cols.value.map(c => `${c.displayName} → ${c.name}`);
+    console.log('Columnas en Registro Notas:', nombres);
+  }
+
   const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items`;
   const body = {
     fields: {
@@ -1208,6 +1407,7 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
       MotivoRechazo: motivo
     }
   };
+  console.log('Enviando a SharePoint:', JSON.stringify(body.fields, null, 2));
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -1215,7 +1415,7 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
   });
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`SharePoint error ${res.status}: ${errText.slice(0,200)}`);
+    throw new Error(`SharePoint error ${res.status}: ${errText.slice(0,300)}`);
   }
   return (await res.json()).id;
 }
