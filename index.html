@@ -1142,49 +1142,52 @@ async function loadMonth() {
 }
 
 // ---- SHAREPOINT ----
-// Obtiene el site-id de SharePoint para usar en las APIs
-async function getSiteId() {
-  const url = `https://graph.microsoft.com/v1.0/sites/${SP_SITE_URL.replace('https://','')}/sites/${SP_SITE_NAME}`;
-  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-  if (res.ok) {
-    const data = await res.json();
-    return data.id;
-  }
-  throw new Error('No se pudo obtener site-id: ' + res.status);
-}
+// Base URL para acceder al sitio SharePoint via Graph API (ruta directa, sin necesitar siteId)
+const SP_GRAPH_BASE = 'https://graph.microsoft.com/v1.0/sites/grupolopezguillensl.sharepoint.com:/sites/NotasdeGastos:';
 
 // Lee la lista de Aprobadores en SharePoint y devuelve los responsables del usuario actual
 async function getAprobadores(email) {
   try {
-    const siteId = await getSiteId();
-    // Intentar buscar por email directamente en campo de texto
-    // Para campos tipo "Persona", Graph devuelve un objeto con Email, LookupValue, etc.
-    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${SP_LIST_APROBADORES}/items?$expand=fields&$top=100`;
+    const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_APROBADORES}/items?$expand=fields&$top=100`;
+    console.log('Leyendo aprobadores desde:', url);
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-    if (res.ok) {
-      const data = await res.json();
-      // Buscar la fila que corresponde al usuario actual
-      const item = data.value.find(v => {
-        const f = v.fields;
-        // Buscar por email en campos de texto o tipo persona
-        const empEmail = f.EmailEmpleado?.Email || f.EmailEmpleado || '';
-        return empEmail.toLowerCase() === email.toLowerCase();
-      });
-      if (item) {
-        const f = item.fields;
-        return {
-          responsable1: f.Responsable1?.Email || f.Responsable1 || '',
-          responsable2: f.Responsable2?.Email || f.Responsable2 || '',
-          found: true
-        };
-      }
-      console.warn('Empleado no encontrado en tabla Aprobadores:', email);
-      console.log('Campos disponibles:', data.value.length ? Object.keys(data.value[0].fields) : 'lista vacía');
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error('Error leyendo lista aprobadores:', res.status, errText);
+      return { responsable1: '', responsable2: '', found: false, error: `${res.status}` };
+    }
+    const data = await res.json();
+    
+    if (data.value.length > 0) {
+      console.log('Campos disponibles:', Object.keys(data.value[0].fields));
+      console.log('Primera fila:', JSON.stringify(data.value[0].fields, null, 2));
+    } else {
+      console.warn('La lista de Aprobadores está vacía');
       return { responsable1: '', responsable2: '', found: false };
     }
-    const errText = await res.text();
-    console.error('Error leyendo aprobadores:', res.status, errText);
-    return { responsable1: '', responsable2: '', found: false, error: res.status };
+
+    const emailBuscar = (email || account.username || '').toLowerCase();
+    console.log('Buscando empleado con email:', emailBuscar);
+
+    const item = data.value.find(v => {
+      const f = v.fields;
+      const posibles = [
+        f.EmailEmpleado?.Email, f.EmailEmpleado?.LookupValue, f.EmailEmpleado,
+        f.Empleado?.Email, f.Empleado, f.Title
+      ];
+      return posibles.some(p => typeof p === 'string' && p.toLowerCase() === emailBuscar);
+    });
+
+    if (item) {
+      const f = item.fields;
+      console.log('Aprobadores encontrados:', JSON.stringify(f, null, 2));
+      const r1 = f.Responsable1?.Email || f.Responsable1?.LookupValue || f.Responsable1 || '';
+      const r2 = f.Responsable2?.Email || f.Responsable2?.LookupValue || f.Responsable2 || '';
+      return { responsable1: r1, responsable2: r2, found: true };
+    }
+
+    console.warn('Empleado no encontrado:', emailBuscar);
+    return { responsable1: '', responsable2: '', found: false };
   } catch (e) {
     console.error('Error en getAprobadores:', e.message);
     return { responsable1: '', responsable2: '', found: false, error: e.message };
@@ -1193,9 +1196,7 @@ async function getAprobadores(email) {
 
 // Escribe en la lista de Registro Notas cuando se cierra una nota
 async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', motivo = '') {
-  const siteId = await getSiteId();
-  const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${SP_LIST_REGISTRO}/items`;
-
+  const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items`;
   const body = {
     fields: {
       Title: `${account.name} - ${mes}`,
@@ -1207,19 +1208,14 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
       MotivoRechazo: motivo
     }
   };
-
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
   });
-
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`SharePoint registro error ${res.status}: ${errText}`);
+    throw new Error(`SharePoint error ${res.status}: ${errText.slice(0,200)}`);
   }
   return (await res.json()).id;
 }
