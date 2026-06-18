@@ -438,6 +438,11 @@ let tickets = []; // {id, num, fecha, detalle, importe, categoria, formaPago, te
 let notaEstado = 'abierta'; // 'abierta' | 'cerrada'
 let pendingTicket = null;   // ticket pendiente de validación por el usuario
 
+// Obtiene el email del usuario logueado de forma fiable
+function getUserEmail() {
+  return (account.username || account.userPrincipalName || '').toLowerCase();
+}
+
 // ---- INIT ----
 window.addEventListener('load', async () => {
   // Mes actual por defecto
@@ -876,8 +881,7 @@ async function cerrarNota() {
     // 1. Leer aprobadores
     statusEl.textContent = 'Leyendo aprobadores de SharePoint...';
     statusEl.className = 'status';
-    const empleadoEmail = await getCurrentUserEmail();
-    const aprobadores = await getAprobadores(empleadoEmail);
+    const aprobadores = await getAprobadores(getUserEmail());
     if (aprobadores.error) {
       statusEl.textContent = `⚠️ Error leyendo aprobadores (${aprobadores.error}). ¿Has añadido Sites.ReadWrite.All en Azure?`;
       statusEl.className = 'status error';
@@ -907,7 +911,7 @@ async function cerrarNota() {
     // 4. Subir PDF a SharePoint (carpeta por empleado/mes)
     statusEl.textContent = 'Subiendo PDF a SharePoint...';
     const mes = document.getElementById('monthPicker').value;
-    const emailUser = empleadoEmail.replace('@', '_at_').replace(/[^a-z0-9._-]/gi, '_');
+    const emailUser = getUserEmail().replace('@', '_at_');
     const spPath = `${emailUser}/${mes}/nota-gastos-${mes}.pdf`;
     const pdfUrl = await uploadToSharePoint(spPath, pdfBlob);
 
@@ -1345,45 +1349,6 @@ async function loadMonth() {
 // Base URL para acceder al sitio SharePoint via Graph API (ruta directa, sin necesitar siteId)
 const SP_GRAPH_BASE = 'https://graph.microsoft.com/v1.0/sites/grupolopezguillensl.sharepoint.com:/sites/NotasdeGastos:';
 
-// Devuelve el email real del usuario autenticado.
-// MSAL suele informar el email en account.username, no en account.userPrincipalName.
-// Si el objeto local no lo trae, se consulta /me en Microsoft Graph.
-function getEmailDesdeAccount() {
-  const claims = account?.idTokenClaims || {};
-  const email = account?.userPrincipalName || account?.username ||
-    claims.preferred_username || claims.upn || claims.email || '';
-  return String(email || '').trim().toLowerCase();
-}
-
-async function getCurrentUserEmail() {
-  const emailLocal = getEmailDesdeAccount();
-  if (emailLocal) return emailLocal;
-
-  if (!accessToken) accessToken = await getToken();
-  const res = await fetch('https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName', {
-    headers: { 'Authorization': `Bearer ${accessToken}` }
-  });
-  if (res.ok) {
-    const me = await res.json();
-    const emailGraph = String(me.mail || me.userPrincipalName || '').trim().toLowerCase();
-    if (emailGraph) return emailGraph;
-  }
-  throw new Error('No se pudo obtener el email del usuario autenticado.');
-}
-
-function normalizarEmailCampoSharePoint(valor) {
-  if (!valor) return '';
-  if (typeof valor === 'string') return valor.trim().toLowerCase();
-  if (Array.isArray(valor)) return normalizarEmailCampoSharePoint(valor[0]);
-  if (typeof valor === 'object') {
-    return String(
-      valor.Email || valor.email || valor.LookupValue || valor.lookupValue ||
-      valor.UserPrincipalName || valor.userPrincipalName || ''
-    ).trim().toLowerCase();
-  }
-  return String(valor).trim().toLowerCase();
-}
-
 // Lee la lista de Aprobadores en SharePoint y devuelve los responsables del usuario actual
 async function getAprobadores(email) {
   try {
@@ -1405,7 +1370,7 @@ async function getAprobadores(email) {
       return { responsable1: '', responsable2: '', found: false };
     }
 
-    const emailBuscar = (email || await getCurrentUserEmail()).toLowerCase();
+    const emailBuscar = (email || getUserEmail()).toLowerCase();
     console.log('Buscando empleado con email:', emailBuscar);
 
     const item = data.value.find(v => {
@@ -1414,7 +1379,7 @@ async function getAprobadores(email) {
         f.EmailEmpleado?.Email, f.EmailEmpleado?.LookupValue, f.EmailEmpleado,
         f.Empleado?.Email, f.Empleado, f.Title
       ];
-      return posibles.some(p => normalizarEmailCampoSharePoint(p) === emailBuscar);
+      return posibles.some(p => typeof p === 'string' && p.toLowerCase() === emailBuscar);
     });
 
     if (item) {
@@ -1436,30 +1401,34 @@ async function getAprobadores(email) {
 // Escribe en la lista de Registro Notas cuando se cierra una nota
 // Busca un registro existente en la lista para este empleado+mes
 async function buscarRegistro(mes) {
-  const email = await getCurrentUserEmail();
-  const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items?$expand=fields&$filter=fields/Mes eq '${mes}'&$top=50`;
+  const email = getUserEmail();
+  const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items?$expand=fields&$top=50`;
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
   if (!res.ok) return null;
   const data = await res.json();
-  // Buscar la fila de este empleado
+  // Buscar la fila de este empleado+mes por email o por título
   const item = data.value.find(v => {
-    const e = normalizarEmailCampoSharePoint(v.fields.EmailEmpleado);
-    return e === email;
+    const f = v.fields;
+    if (f.Mes !== mes) return false;
+    const empEmail = (f.EmailEmpleado || '').toLowerCase();
+    const title = (f.Title || '').toLowerCase();
+    const nombre = (account.name || '').toLowerCase();
+    return empEmail === email || title.includes(nombre) || title.includes(mes);
   });
+  if (item) console.log('Registro encontrado (id:', item.id, ')');
   return item ? item.id : null;
 }
 
 // Escribe o actualiza en la lista de Registro Notas
 async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', motivo = '') {
-  const empleadoEmail = await getCurrentUserEmail();
   const fields = {
-    Title: `${account.name || empleadoEmail} - ${mes}`,
-    EmailEmpleado: empleadoEmail,
+    Title: `${account.name} - ${mes}`,
+    EmailEmpleado: getUserEmail(),
     Mes: mes,
     Estado: estado,
-    PDFUrl: pdfUrl || '',
-    ApprovalUrl: approvalUrl || '',
-    MotivoRechazo: motivo || ''
+    PDFUrl: pdfUrl,
+    ApprovalUrl: approvalUrl,
+    MotivoRechazo: motivo
   };
 
   // Buscar si ya existe un registro para este empleado+mes
@@ -1515,21 +1484,24 @@ async function borrarRegistro(mes) {
 }
 
 // Sube un archivo a la biblioteca de documentos del sitio SharePoint
-let spDriveId = null;
-async function getSharePointDriveId() {
-  if (spDriveId) return spDriveId;
-  const url = `${SP_GRAPH_BASE}/drive`;
+let spSiteId = null;
+async function getSharePointSiteId() {
+  if (spSiteId) return spSiteId;
+  const url = `${SP_GRAPH_BASE}`;
+  console.log('Obteniendo site info de:', url);
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-  if (!res.ok) throw new Error('No se pudo obtener el drive de SharePoint: ' + res.status);
+  if (!res.ok) throw new Error('No se pudo obtener site info: ' + res.status);
   const data = await res.json();
-  spDriveId = data.id;
-  console.log('SharePoint drive ID:', spDriveId);
-  return spDriveId;
+  spSiteId = data.id;
+  console.log('SharePoint site ID:', spSiteId);
+  return spSiteId;
 }
 
 async function uploadToSharePoint(filePath, blob) {
-  const driveId = await getSharePointDriveId();
-  const url = `https://graph.microsoft.com/v1.0/drives/${driveId}/root:/${filePath}:/content`;
+  const siteId = await getSharePointSiteId();
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${encodedPath}:/content`;
+  console.log('Upload URL:', url);
   const res = await fetch(url, {
     method: 'PUT',
     headers: {
