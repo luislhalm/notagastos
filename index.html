@@ -88,7 +88,7 @@
     transition: border-color .15s;
   }
   .tkt-card:hover { border-color: #3d4f63; }
-  /* Fila 1: icono + comercio (full width) + borrar */
+  /* Fila 1: icono + detalle (full width) + borrar */
   .tkt-top { display: flex; align-items: center; gap: 10px; }
   .tkt-icon {
     width: 40px; height: 40px; border-radius: 10px; flex-shrink: 0;
@@ -274,8 +274,8 @@
           <input type="date" id="valFecha">
         </div>
         <div class="val-row">
-          <label>Comercio</label>
-          <input id="valComercio" maxlength="40" oninput="this.value=limpiarConcepto(this.value)">
+          <label>Detalle</label>
+          <input id="valDetalle" maxlength="40" oninput="this.value=limpiarConcepto(this.value)">
         </div>
         <div class="val-row">
           <label>Importe €</label>
@@ -421,7 +421,7 @@ const msalConfig = {
 };
 
 let msalInstance, account = null, accessToken = null;
-let tickets = []; // {id, num, fecha, comercio, importe, categoria, formaPago, texto, imageDataUrl}
+let tickets = []; // {id, num, fecha, detalle, importe, categoria, formaPago, texto, imageDataUrl}
 let notaEstado = 'abierta'; // 'abierta' | 'cerrada'
 let pendingTicket = null;   // ticket pendiente de validación por el usuario
 
@@ -606,7 +606,7 @@ async function processImage(dataUrl) {
     pendingTicket = {
       id: Date.now(),
       fecha: parsed.fecha || '',
-      comercio: limpiarConcepto(parsed.comercio),
+      detalle: '',  // el usuario lo rellena
       importe: limpiarImporte(parsed.importe),
       categoria: catDetectada,
       formaPago: detectarFormaPago(catDetectada),
@@ -638,7 +638,7 @@ function mostrarValidacion() {
   // Rellenar campos
   const t = pendingTicket;
   document.getElementById('valFecha').value = aFechaInput(t.fecha) || '';
-  document.getElementById('valComercio').value = t.comercio;
+  document.getElementById('valDetalle').value = t.detalle;
   document.getElementById('valImporte').value = t.importe ? formatearImporte(t.importe) : '';
 
   // Rellenar selects de categoría y pago
@@ -668,7 +668,7 @@ function confirmarTicket() {
   } else {
     pendingTicket.fecha = '';
   }
-  pendingTicket.comercio = limpiarConcepto(document.getElementById('valComercio').value);
+  pendingTicket.detalle = limpiarConcepto(document.getElementById('valDetalle').value);
   pendingTicket.importe = limpiarImporte(document.getElementById('valImporte').value);
   pendingTicket.categoria = document.getElementById('valCategoria').value;
   pendingTicket.formaPago = document.getElementById('valPago').value;
@@ -698,7 +698,7 @@ function descartarTicket() {
   setSaveStatus("Ticket descartado.", '');
 }
 
-// Extracción heurística de fecha, comercio e importe
+// Extracción heurística de fecha e importe (detalle lo rellena el usuario)
 function parseTicket(text) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
   // Importe: busca el mayor número con formato moneda (total)
@@ -719,10 +719,7 @@ function parseTicket(text) {
   let fecha = '';
   const dateRe = /(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/;
   for (const l of lines) { const m = l.match(dateRe); if (m) { fecha = m[1]; break; } }
-  // Comercio: primera línea significativa
-  let comercio = lines.find(l => l.length > 3 && /[A-Za-zÁÉÍÓÚáéíóú]/.test(l)) || '';
-  comercio = comercio.slice(0, 40);
-  return { fecha, comercio, importe };
+  return { fecha, importe };
 }
 
 // ---- TARJETAS ----
@@ -765,9 +762,9 @@ function renderTable() {
       <div class="tkt-top">
         <div class="tkt-icon" style="background:${cat.color}22;color:${cat.color}">${cat.icon}</div>
         <span class="tkt-num">#${t.num || '?'}</span>
-        <input class="tkt-comercio" value="${escapeHtml(t.comercio)}" placeholder="Comercio"
+        <input class="tkt-comercio" value="${escapeHtml(t.detalle)}" placeholder="Detalle del gasto"
           maxlength="40" oninput="this.value=limpiarConcepto(this.value)"
-          onchange="updateTicket(${i},'comercio',limpiarConcepto(this.value))" ${dis}>
+          onchange="updateTicket(${i},'detalle',limpiarConcepto(this.value))" ${dis}>
         ${cerrada ? '' : `<button class="tkt-del" onclick="removeTicket(${i})" title="Eliminar">✕</button>`}
       </div>
       <div class="tkt-mid">
@@ -984,7 +981,7 @@ async function buildExcel(month) {
     const pago = FORMAS_PAGO.find(p => p.id === t.formaPago) || FORMAS_PAGO[0];
     const serial = fechaSerial(t.fecha);
     if (serial != null) xml = setCellValue(xml, 'B'+r, serial);
-    xml = setCellValue(xml, 'C'+r, t.comercio || cat.label, true);
+    xml = setCellValue(xml, 'C'+r, t.detalle || cat.label, true);
     const imp = parseFloat(String(t.importe).replace(',','.')) || 0;
     xml = setCellValue(xml, cat.col + r, imp);
     xml = setCellValue(xml, pago.col + r, imp);
