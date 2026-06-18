@@ -313,7 +313,7 @@
 /* ============================================================
    CONFIGURACIÓN — EDITA ESTOS VALORES
    Regístralo en Azure Portal > Entra ID > App registrations
-   Permisos Graph (delegados): User.Read, Files.ReadWrite
+   Permisos Graph (delegados): User.Read, Files.ReadWrite, Sites.ReadWrite.All
    Redirect URI: la URL donde alojes este archivo (tipo SPA)
    ============================================================ */
 const CLIENT_ID = "b036a67c-aae7-4856-a620-05dfd7f26093";   // Application (client) ID — APP Nota de gastos
@@ -327,7 +327,7 @@ const SP_LIST_APROBADORES = "f5a2da35-c8d2-4ce0-8a53-44e54dd99940";
 const SP_LIST_REGISTRO = "6270c422-5183-4224-bcc9-211ac8156822";
 const EMAIL_ELENA = "luis.lopez@grupolopezguillen.com";      // Revisora de tickets
 const EMAIL_ILDEFONSO = "luis.lopez@grupolopezguillen.com";  // Para adjuntar en ERP
-const GRAPH_SCOPES = ["User.Read", "Files.ReadWrite"];
+const GRAPH_SCOPES = ["User.Read", "Files.ReadWrite", "Sites.ReadWrite.All"];
 
 /* Categorías de gasto -> columna del Excel (fila destino 8..35)
    G=combustible H=tte(transporte/parking) I=comidas J=rrpp K=otros */
@@ -867,28 +867,45 @@ async function cerrarNota() {
   }
   if (!confirm('¿Cerrar la nota de gastos del mes? Se guardará y comenzará el flujo de aprobación.\n\nPuedes reabrirla después si necesitas corregir algo.')) return;
 
+  const statusEl = document.getElementById('cerrarStatus');
   notaEstado = 'cerrada';
-  document.getElementById('cerrarStatus').textContent = 'Cerrando y guardando...';
-  document.getElementById('cerrarStatus').className = 'status';
   try {
     accessToken = await getToken();
-    
-    // 1. Leer aprobadores de SharePoint
+
+    // 1. Leer aprobadores
+    statusEl.textContent = 'Leyendo aprobadores de SharePoint...';
+    statusEl.className = 'status';
     const aprobadores = await getAprobadores(account.userPrincipalName);
-    console.log('Aprobadores encontrados:', aprobadores);
-    
-    // 2. Guardar en OneDrive con estado cerrada
+    if (aprobadores.error) {
+      statusEl.textContent = `⚠️ Error leyendo aprobadores (${aprobadores.error}). ¿Has añadido Sites.ReadWrite.All en Azure?`;
+      statusEl.className = 'status error';
+      notaEstado = 'abierta';
+      actualizarEstadoUI();
+      return;
+    }
+    if (!aprobadores.found) {
+      statusEl.textContent = '⚠️ Tu email no está en la tabla de Aprobadores de SharePoint. Añádete primero.';
+      statusEl.className = 'status error';
+      notaEstado = 'abierta';
+      actualizarEstadoUI();
+      return;
+    }
+    console.log('Aprobadores:', aprobadores);
+
+    // 2. Guardar en OneDrive
+    statusEl.textContent = 'Guardando en OneDrive...';
     await generateAndSave();
-    
-    // 3. Escribir en el registro de SharePoint
+
+    // 3. Escribir en SharePoint
+    statusEl.textContent = 'Registrando en SharePoint...';
     const mes = document.getElementById('monthPicker').value;
     await escribirEnRegistro(mes, 'Cerrada');
-    
-    document.getElementById('cerrarStatus').textContent = '✓ Nota cerrada y guardada en SharePoint. El flujo de aprobación se iniciará próximamente.';
-    document.getElementById('cerrarStatus').className = 'status success';
+
+    statusEl.textContent = `✓ Nota cerrada. Guardada en OneDrive y registrada en SharePoint. Aprobadores: ${aprobadores.responsable1 || 'ninguno'}${aprobadores.responsable2 ? ' → ' + aprobadores.responsable2 : ''}`;
+    statusEl.className = 'status success';
   } catch (e) {
-    document.getElementById('cerrarStatus').textContent = 'Error al cerrar: ' + e.message;
-    document.getElementById('cerrarStatus').className = 'status error';
+    statusEl.textContent = 'Error al cerrar: ' + e.message;
+    statusEl.className = 'status error';
     notaEstado = 'abierta';
   }
   actualizarEstadoUI();
@@ -1140,68 +1157,71 @@ async function getSiteId() {
 async function getAprobadores(email) {
   try {
     const siteId = await getSiteId();
-    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${SP_LIST_APROBADORES}/items?$filter=fields/EmailEmpleado eq '${email}'&$select=fields`;
+    // Intentar buscar por email directamente en campo de texto
+    // Para campos tipo "Persona", Graph devuelve un objeto con Email, LookupValue, etc.
+    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${SP_LIST_APROBADORES}/items?$expand=fields&$top=100`;
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
     if (res.ok) {
       const data = await res.json();
-      if (data.value.length > 0) {
-        const item = data.value[0].fields;
+      // Buscar la fila que corresponde al usuario actual
+      const item = data.value.find(v => {
+        const f = v.fields;
+        // Buscar por email en campos de texto o tipo persona
+        const empEmail = f.EmailEmpleado?.Email || f.EmailEmpleado || '';
+        return empEmail.toLowerCase() === email.toLowerCase();
+      });
+      if (item) {
+        const f = item.fields;
         return {
-          responsable1: item.Responsable1 || '',
-          responsable2: item.Responsable2 || ''
+          responsable1: f.Responsable1?.Email || f.Responsable1 || '',
+          responsable2: f.Responsable2?.Email || f.Responsable2 || '',
+          found: true
         };
       }
+      console.warn('Empleado no encontrado en tabla Aprobadores:', email);
+      console.log('Campos disponibles:', data.value.length ? Object.keys(data.value[0].fields) : 'lista vacía');
+      return { responsable1: '', responsable2: '', found: false };
     }
-    // Si no encuentra, devuelve los valores por defecto (para pruebas)
-    return {
-      responsable1: EMAIL_ELENA,
-      responsable2: ''
-    };
+    const errText = await res.text();
+    console.error('Error leyendo aprobadores:', res.status, errText);
+    return { responsable1: '', responsable2: '', found: false, error: res.status };
   } catch (e) {
-    console.warn('Error leyendo aprobadores:', e.message);
-    return {
-      responsable1: EMAIL_ELENA,
-      responsable2: ''
-    };
+    console.error('Error en getAprobadores:', e.message);
+    return { responsable1: '', responsable2: '', found: false, error: e.message };
   }
 }
 
 // Escribe en la lista de Registro Notas cuando se cierra una nota
 async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', motivo = '') {
-  try {
-    const siteId = await getSiteId();
-    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${SP_LIST_REGISTRO}/items`;
-    
-    const body = {
-      fields: {
-        Title: `${account.name} - ${mes}`,
-        EmailEmpleado: account.userPrincipalName,
-        Mes: mes,
-        Estado: estado,
-        PDFUrl: pdfUrl,
-        ApprovalUrl: approvalUrl,
-        MotivoRechazo: motivo
-      }
-    };
+  const siteId = await getSiteId();
+  const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/lists/${SP_LIST_REGISTRO}/items`;
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      return data.id;
-    } else {
-      console.error('Error escribiendo registro:', res.status, await res.text());
+  const body = {
+    fields: {
+      Title: `${account.name} - ${mes}`,
+      EmailEmpleado: account.userPrincipalName,
+      Mes: mes,
+      Estado: estado,
+      PDFUrl: pdfUrl,
+      ApprovalUrl: approvalUrl,
+      MotivoRechazo: motivo
     }
-  } catch (e) {
-    console.error('Error en escribirEnRegistro:', e.message);
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`SharePoint registro error ${res.status}: ${errText}`);
   }
+  return (await res.json()).id;
 }
 
 async function uploadFile(path, blob) {
