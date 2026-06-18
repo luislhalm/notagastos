@@ -270,12 +270,12 @@
       <span class="label">Verificar datos del ticket</span>
       <div class="val-form">
         <div class="val-row">
-          <label>Fecha</label>
-          <input type="date" id="valFecha">
+          <label>Detalle</label>
+          <input id="valDetalle" maxlength="40" placeholder="Ej: Comida cliente Madrid" oninput="this.value=limpiarConcepto(this.value)">
         </div>
         <div class="val-row">
-          <label>Detalle</label>
-          <input id="valDetalle" maxlength="40" oninput="this.value=limpiarConcepto(this.value)">
+          <label>Fecha</label>
+          <input type="date" id="valFecha">
         </div>
         <div class="val-row">
           <label>Importe €</label>
@@ -295,7 +295,7 @@
           <button class="btn-secondary" style="margin-left:auto;font-size:12px" onclick="document.getElementById('ocrText').classList.toggle('hidden')">Ver OCR</button>
         </div>
       </div>
-      <canvas id="validatePreview" style="margin-top:12px"></canvas>
+      <canvas id="validatePreview" style="margin-top:12px;max-height:200px;width:auto;border-radius:8px;object-fit:contain"></canvas>
       <div class="ocr-text hidden" id="ocrText"></div>
     </div>
 
@@ -334,10 +334,14 @@ const CATEGORIAS = [
 // Detecta la categoría a partir del texto OCR
 function detectarCategoria(texto) {
   const t = (texto || "").toLowerCase();
-  if (/(restaurante|menu|menú|comida|cafeter|bar |almuerzo|cena|menú|tapas|cervec|burger|pizz)/.test(t)) return "comidas";
-  if (/(gasolin|carburant|combustible|diesel|gasóleo|gasoil|repsol|cepsa|bp |galp|shell|estación de servicio|litros)/.test(t)) return "combustible";
-  if (/(parking|aparcamiento|garaje|peaje|autopista|taxi|renfe|billete|metro|bus |aena|aeropuerto)/.test(t)) return "tte";
-  if (/(hotel|hospedaje|alojamiento|invitad|obsequio|regalo|atención)/.test(t)) return "rrpp";
+  // Comidas: términos de restaurantes, bares y tickets de comida españoles
+  if (/(restaurante|rest\.|menú|menu|men[uú]|comida|cafeter|café|bar |taberna|almuerzo|cena|desayuno|merienda|tapas|cervec|burger|pizz|bocadill|plato|cubierto|bebida|mesa\s|camarero|propina|iva.*reducido|factura simplificada|caja:\s*\d)/.test(t)) return "comidas";
+  // Combustible
+  if (/(gasolin|carburant|combustible|diesel|gas[oó]leo|gasoil|repsol|cepsa|bp\s|galp|shell|estaci[oó]n de servicio|litros|surtidor|e\.s\.|e\.e\.s\.s)/.test(t)) return "combustible";
+  // Transporte
+  if (/(parking|aparcamiento|garaje|peaje|autopista|taxi|uber|cabify|renfe|billete|metro|bus\s|aena|aeropuerto|tren|avión|vuelo|alsa|emt)/.test(t)) return "tte";
+  // RRPP
+  if (/(hotel|hospedaje|alojamiento|hostal|pensión|booking|invitad|obsequio|regalo|atención|detalle)/.test(t)) return "rrpp";
   return "otros";
 }
 
@@ -629,11 +633,14 @@ function mostrarValidacion() {
   const card = document.getElementById('validateCard');
   card.classList.remove('hidden');
 
-  // Copiar imagen al preview de validación
+  // Copiar imagen al preview de validación (tamaño reducido)
   const src = document.getElementById('preview');
   const dest = document.getElementById('validatePreview');
-  dest.width = src.width; dest.height = src.height;
-  dest.getContext('2d').drawImage(src, 0, 0);
+  const maxH = 180;
+  const scale = Math.min(1, maxH / src.height);
+  dest.width = Math.round(src.width * scale);
+  dest.height = Math.round(src.height * scale);
+  dest.getContext('2d').drawImage(src, 0, 0, dest.width, dest.height);
 
   // Rellenar campos
   const t = pendingTicket;
