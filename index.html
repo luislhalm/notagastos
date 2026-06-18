@@ -295,7 +295,7 @@
           <button class="btn-secondary" style="margin-left:auto;font-size:12px" onclick="document.getElementById('ocrText').classList.toggle('hidden')">Ver OCR</button>
         </div>
       </div>
-      <canvas id="validatePreview" style="margin-top:12px;max-height:200px;width:auto;border-radius:8px;object-fit:contain"></canvas>
+      <canvas id="validatePreview" style="margin-top:12px;width:100%;border-radius:8px"></canvas>
       <div class="ocr-text hidden" id="ocrText"></div>
     </div>
 
@@ -615,7 +615,8 @@ async function processImage(dataUrl) {
       categoria: catDetectada,
       formaPago: detectarFormaPago(catDetectada),
       texto: text,
-      imageDataUrl: dataUrl
+      imageDataUrl: dataUrl,
+      saved: false
     };
 
     // Ocultar OCR, mostrar panel de validación
@@ -633,11 +634,11 @@ function mostrarValidacion() {
   const card = document.getElementById('validateCard');
   card.classList.remove('hidden');
 
-  // Copiar imagen al preview de validación (tamaño reducido)
+  // Copiar imagen al preview de validación (ajustado al ancho)
   const src = document.getElementById('preview');
   const dest = document.getElementById('validatePreview');
-  const maxH = 180;
-  const scale = Math.min(1, maxH / src.height);
+  const maxW = Math.min(500, window.innerWidth - 80);
+  const scale = Math.min(1, maxW / src.width);
   dest.width = Math.round(src.width * scale);
   dest.height = Math.round(src.height * scale);
   dest.getContext('2d').drawImage(src, 0, 0, dest.width, dest.height);
@@ -809,6 +810,7 @@ function verFoto(i) {
 
 function updateTicket(i, field, val) {
   tickets[i][field] = val;
+  tickets[i].saved = false;
   if (field === 'categoria') {
     tickets[i].formaPago = detectarFormaPago(val);
     renderTable();
@@ -818,11 +820,12 @@ function setFecha(i, val) {
   if (!val) return;
   const [y,m,d] = val.split('-').map(Number);
   tickets[i].fecha = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
+  tickets[i].saved = false;
   if (!fechaEnMesActual(val)) {
     setSaveStatus(`⚠️ La fecha de este ticket no es del mes seleccionado, pero se guardará igualmente.`, 'error');
   } else { setSaveStatus("", ''); }
 }
-function setImporte(i, val) { tickets[i].importe = limpiarImporte(val); renderTable(); }
+function setImporte(i, val) { tickets[i].importe = limpiarImporte(val); tickets[i].saved = false; renderTable(); }
 function removeTicket(i) { tickets.splice(i,1); renderTable(); }
 function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
@@ -900,12 +903,20 @@ async function generateAndSave() {
     setSaveStatus("Guardando datos...", '');
     const datos = JSON.stringify({ month, tickets, estado: notaEstado });
     await uploadFile(`${folderPath}/datos.json`, new Blob([datos], {type:'application/json'}));
-    for (let i = 0; i < tickets.length; i++) {
-      setSaveStatus(`Subiendo ticket ${i+1} de ${tickets.length}...`, '');
-      const t = tickets[i];
-      const blob = dataURLtoBlob(t.imageDataUrl);
-      const numStr = String(t.num || i+1).padStart(2, '0');
-      await uploadFile(`${folderPath}/tickets/ticket-${numStr}.jpg`, blob);
+
+    // Solo subir imágenes de tickets nuevos o modificados
+    const pendientes = tickets.filter(t => !t.saved);
+    if (pendientes.length) {
+      for (let i = 0; i < pendientes.length; i++) {
+        setSaveStatus(`Subiendo ticket ${i+1} de ${pendientes.length} (nuevos)...`, '');
+        const t = pendientes[i];
+        const blob = dataURLtoBlob(t.imageDataUrl);
+        const numStr = String(t.num || 1).padStart(2, '0');
+        await uploadFile(`${folderPath}/tickets/ticket-${numStr}.jpg`, blob);
+        t.saved = true;
+      }
+    } else {
+      setSaveStatus("Sin tickets nuevos que subir...", '');
     }
 
     // 2. Generar y subir el Excel. Si está abierto en Excel, dará bloqueo (423)
@@ -920,7 +931,8 @@ async function generateAndSave() {
       }
       throw e;
     }
-    setSaveStatus(`✓ Guardado en OneDrive › ${folderPath} (${tickets.length} tickets + imágenes)`, 'success');
+    const nuevos = pendientes.length;
+    setSaveStatus(`✓ Guardado en OneDrive › ${folderPath} (${tickets.length} tickets, ${nuevos} imagen${nuevos!==1?'es':''} subida${nuevos!==1?'s':''})`, 'success');
   } catch (e) {
     if (e.locked) {
       setSaveStatus(`El archivo está abierto y bloqueado. Ciérralo y vuelve a intentarlo.`, 'error');
@@ -1075,7 +1087,7 @@ async function loadMonth() {
         const cat = t.categoria || detectarCategoria(t.texto);
         const num = t.num || nextNum;
         nextNum = Math.max(nextNum, num) + 1;
-        return { ...t, num, categoria: cat, formaPago: t.formaPago || detectarFormaPago(cat) };
+        return { ...t, num, categoria: cat, formaPago: t.formaPago || detectarFormaPago(cat), saved: true };
       });
       actualizarEstadoUI();
       setSaveStatus(`Cargados ${tickets.length} tickets guardados de ${month}.`, 'success');
