@@ -1144,7 +1144,7 @@ async function loadMonth() {
 // ---- SHAREPOINT ----
 // Obtiene el site-id de SharePoint para usar en las APIs
 async function getSiteId() {
-  const url = `https://graph.microsoft.com/v1.0/sites/${SP_SITE_URL.replace('https://','')}/sites/${SP_SITE_NAME}`;
+  const url = `https://graph.microsoft.com/v1.0/sites/grupolopezguillensl.sharepoint.com:/sites/NotasdeGastos`;
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
   if (res.ok) {
     const data = await res.json();
