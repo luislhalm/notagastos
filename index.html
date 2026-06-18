@@ -156,9 +156,36 @@
   .month-selector { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   .month-selector input { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 9px 12px; font-family: inherit; font-size: 14px; }
   .mes-aviso { background: rgba(210,153,34,.12); border: 1px solid rgba(210,153,34,.4); color: #e3b341; border-radius: 8px; padding: 10px 14px; font-size: 13px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-  .ticket-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; cursor: pointer; }
   .empty { text-align: center; color: var(--muted); padding: 30px; font-size: 14px; }
   .badge { background: var(--surface-2); padding: 3px 9px; border-radius: 20px; font-size: 12px; color: var(--muted); }
+
+  /* Validación de ticket */
+  .val-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+  .val-row { display: flex; align-items: center; gap: 10px; }
+  .val-row label { width: 90px; flex-shrink: 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+  .val-row input, .val-row select {
+    flex: 1; background: var(--surface-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 8px 10px; font-family: inherit; font-size: 14px; color-scheme: dark;
+  }
+  .val-row input:focus, .val-row select:focus { outline: none; border-color: var(--accent); }
+  .val-actions { display: flex; gap: 10px; margin-top: 6px; align-items: center; }
+
+  /* Estado de la nota */
+  .nota-estado {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-radius: 10px; font-size: 13px; font-weight: 600; margin-bottom: 16px;
+  }
+  .nota-estado.abierta { background: rgba(46,160,67,.1); border: 1px solid rgba(46,160,67,.3); color: var(--green); }
+  .nota-estado.cerrada { background: rgba(218,54,51,.1); border: 1px solid rgba(218,54,51,.3); color: var(--red); }
+  .nota-estado .estado-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .nota-estado.abierta .estado-dot { background: var(--green); }
+  .nota-estado.cerrada .estado-dot { background: var(--red); }
+
+  /* Número de ticket en tarjeta */
+  .tkt-num { font-size: 11px; color: var(--muted); background: var(--surface); border-radius: 6px; padding: 2px 7px; font-weight: 700; flex-shrink: 0; }
+
+  /* Disabled overlay cuando la nota está cerrada */
+  .disabled-overlay { pointer-events: none; opacity: 0.5; }
   .config-note { background: rgba(47,129,247,.1); border: 1px solid rgba(47,129,247,.3); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--muted); margin-bottom: 16px; }
   .config-note code { color: var(--accent); }
 </style>
@@ -193,15 +220,30 @@
     </div>
     <div id="mesPasadoAviso" class="mes-aviso hidden"></div>
 
-    <!-- ACCIONES -->
-    <div class="card">
+    <!-- ESTADO DE LA NOTA -->
+    <div id="notaEstadoBar" class="nota-estado abierta">
+      <div class="estado-dot"></div>
+      <span id="estadoTexto">Nota abierta</span>
+    </div>
+
+    <!-- ACCIONES (solo visibles si nota abierta) -->
+    <div class="card" id="accionesCard">
       <div class="btn-row">
         <button class="btn-primary" onclick="openCamera()">📷 Capturar ticket</button>
         <button class="btn-secondary" onclick="document.getElementById('fileInput').click()">🖼️ Subir imagen</button>
-        <button class="btn-secondary" onclick="generateAndSave()" id="saveBtn">☁️ Generar y guardar nota del mes</button>
+        <button class="btn-secondary" onclick="generateAndSave()" id="saveBtn">☁️ Guardar borrador</button>
       </div>
       <input type="file" id="fileInput" accept="image/*" class="hidden" onchange="handleFileUpload(event)">
       <div id="saveStatus" class="status"></div>
+    </div>
+
+    <!-- BOTÓN CERRAR/ABRIR NOTA -->
+    <div class="card" id="cerrarCard">
+      <div class="btn-row">
+        <button class="btn-primary" id="cerrarBtn" onclick="cerrarNota()" style="background:var(--green)">🔒 Cerrar nota de gastos</button>
+        <button class="btn-secondary hidden" id="abrirBtn" onclick="abrirNota()">🔓 Reabrir nota para editar</button>
+      </div>
+      <div id="cerrarStatus" class="status"></div>
     </div>
 
     <!-- CAMARA -->
@@ -221,7 +263,40 @@
       <canvas id="preview"></canvas>
       <div class="progress"><div class="progress-bar" id="ocrProgress"></div></div>
       <div class="status" id="ocrStatus">Reconociendo texto...</div>
-      <div class="ocr-text hidden" id="ocrText"></div>
+    </div>
+
+    <!-- VALIDACIÓN DEL TICKET (antes de añadirlo) -->
+    <div class="card hidden" id="validateCard">
+      <span class="label">Verificar datos del ticket</span>
+      <canvas id="validatePreview"></canvas>
+      <div class="val-form">
+        <div class="val-row">
+          <label>Fecha</label>
+          <input type="date" id="valFecha">
+        </div>
+        <div class="val-row">
+          <label>Comercio</label>
+          <input id="valComercio" maxlength="40" oninput="this.value=limpiarConcepto(this.value)">
+        </div>
+        <div class="val-row">
+          <label>Importe €</label>
+          <input id="valImporte" inputmode="decimal">
+        </div>
+        <div class="val-row">
+          <label>Categoría</label>
+          <select id="valCategoria"></select>
+        </div>
+        <div class="val-row">
+          <label>Forma de pago</label>
+          <select id="valPago"></select>
+        </div>
+        <div class="ocr-text hidden" id="ocrText"></div>
+        <div class="val-actions">
+          <button class="btn-primary" onclick="confirmarTicket()">✓ Añadir ticket</button>
+          <button class="btn-secondary" onclick="descartarTicket()">✕ Descartar</button>
+          <button class="btn-secondary" style="margin-left:auto;font-size:12px" onclick="document.getElementById('ocrText').classList.toggle('hidden')">Ver OCR</button>
+        </div>
+      </div>
     </div>
 
     <!-- TABLA -->
@@ -346,7 +421,9 @@ const msalConfig = {
 };
 
 let msalInstance, account = null, accessToken = null;
-let tickets = []; // {id, fecha, comercio, importe, texto, imageDataUrl}
+let tickets = []; // {id, num, fecha, comercio, importe, categoria, formaPago, texto, imageDataUrl}
+let notaEstado = 'abierta'; // 'abierta' | 'cerrada'
+let pendingTicket = null;   // ticket pendiente de validación por el usuario
 
 // ---- INIT ----
 window.addEventListener('load', async () => {
@@ -491,8 +568,12 @@ function preprocesarImagen(dataUrl) {
 }
 
 async function processImage(dataUrl) {
-  const card = document.getElementById('ocrCard');
-  card.classList.remove('hidden');
+  if (notaEstado === 'cerrada') {
+    alert("La nota está cerrada. Reabre la nota para añadir tickets.");
+    return;
+  }
+  const ocrCard = document.getElementById('ocrCard');
+  ocrCard.classList.remove('hidden');
   const preview = document.getElementById('preview');
   const img = new Image();
   img.onload = () => {
@@ -505,12 +586,10 @@ async function processImage(dataUrl) {
   };
   img.src = dataUrl;
 
-  document.getElementById('ocrText').classList.add('hidden');
   document.getElementById('ocrStatus').textContent = "Mejorando imagen y reconociendo texto...";
   document.getElementById('ocrStatus').className = "status";
 
   try {
-    // Preprocesar imagen: escala de grises + más contraste => mejora el OCR
     const procUrl = await preprocesarImagen(dataUrl);
     const { data } = await Tesseract.recognize(procUrl, 'spa', {
       logger: m => {
@@ -521,13 +600,12 @@ async function processImage(dataUrl) {
     });
     const text = data.text;
     const parsed = parseTicket(text);
-    // Conservar la fecha detectada por el OCR (aunque sea de otro mes)
-    let fechaDetectada = parsed.fecha || "";
-    let fueraDeMes = fechaDetectada && !fechaEnMesActual(fechaDetectada);
     const catDetectada = detectarCategoria(text);
-    const ticket = {
+
+    // Guardar como ticket pendiente (no se añade aún)
+    pendingTicket = {
       id: Date.now(),
-      fecha: fechaDetectada,
+      fecha: parsed.fecha || '',
       comercio: limpiarConcepto(parsed.comercio),
       importe: limpiarImporte(parsed.importe),
       categoria: catDetectada,
@@ -535,23 +613,89 @@ async function processImage(dataUrl) {
       texto: text,
       imageDataUrl: dataUrl
     };
-    tickets.push(ticket);
-    renderTable();
 
-    if (fueraDeMes) {
-      setSaveStatus(`⚠️ Este ticket (${fechaDetectada}) no es del mes seleccionado, pero se ha añadido igual. Revísalo si no es lo que querías.`, 'error');
-    }
+    // Ocultar OCR, mostrar panel de validación
+    ocrCard.classList.add('hidden');
+    mostrarValidacion();
 
-    document.getElementById('ocrStatus').textContent = "✓ Ticket añadido. Revisa los datos en la tabla.";
-    document.getElementById('ocrStatus').className = "status success";
-    const ot = document.getElementById('ocrText');
-    ot.textContent = text.trim().slice(0, 500);
-    ot.classList.remove('hidden');
-    setTimeout(() => card.classList.add('hidden'), 2500);
   } catch (e) {
     document.getElementById('ocrStatus').textContent = "Error en OCR: " + e.message;
     document.getElementById('ocrStatus').className = "status error";
   }
+}
+
+// Muestra el panel de validación con los datos del ticket pendiente
+function mostrarValidacion() {
+  const card = document.getElementById('validateCard');
+  card.classList.remove('hidden');
+
+  // Copiar imagen al preview de validación
+  const src = document.getElementById('preview');
+  const dest = document.getElementById('validatePreview');
+  dest.width = src.width; dest.height = src.height;
+  dest.getContext('2d').drawImage(src, 0, 0);
+
+  // Rellenar campos
+  const t = pendingTicket;
+  document.getElementById('valFecha').value = aFechaInput(t.fecha) || '';
+  document.getElementById('valComercio').value = t.comercio;
+  document.getElementById('valImporte').value = t.importe ? formatearImporte(t.importe) : '';
+
+  // Rellenar selects de categoría y pago
+  const selCat = document.getElementById('valCategoria');
+  selCat.innerHTML = CATEGORIAS.map(c =>
+    `<option value="${c.id}" ${t.categoria===c.id?'selected':''}>${c.label}</option>`).join('');
+  selCat.onchange = () => {
+    document.getElementById('valPago').value = detectarFormaPago(selCat.value);
+  };
+  const selPago = document.getElementById('valPago');
+  selPago.innerHTML = FORMAS_PAGO.map(p =>
+    `<option value="${p.id}" ${t.formaPago===p.id?'selected':''}>${p.label}</option>`).join('');
+
+  // Texto OCR
+  const ot = document.getElementById('ocrText');
+  ot.textContent = t.texto.trim().slice(0, 500);
+  ot.classList.add('hidden');
+}
+
+// El usuario confirma los datos del ticket
+function confirmarTicket() {
+  if (!pendingTicket) return;
+  const fechaVal = document.getElementById('valFecha').value;
+  if (fechaVal) {
+    const [y,m,d] = fechaVal.split('-').map(Number);
+    pendingTicket.fecha = `${String(d).padStart(2,'0')}/${String(m).padStart(2,'0')}/${y}`;
+  } else {
+    pendingTicket.fecha = '';
+  }
+  pendingTicket.comercio = limpiarConcepto(document.getElementById('valComercio').value);
+  pendingTicket.importe = limpiarImporte(document.getElementById('valImporte').value);
+  pendingTicket.categoria = document.getElementById('valCategoria').value;
+  pendingTicket.formaPago = document.getElementById('valPago').value;
+
+  // Asignar número secuencial
+  const maxNum = tickets.reduce((max, t) => Math.max(max, t.num || 0), 0);
+  pendingTicket.num = maxNum + 1;
+
+  tickets.push(pendingTicket);
+  const lastTicket = pendingTicket;
+  pendingTicket = null;
+  document.getElementById('validateCard').classList.add('hidden');
+  renderTable();
+
+  const fueraDeMes = lastTicket.fecha && !fechaEnMesActual(lastTicket.fecha);
+  if (fueraDeMes) {
+    setSaveStatus(`⚠️ Este ticket no es del mes seleccionado, pero se ha añadido igual.`, 'error');
+  } else {
+    setSaveStatus(`✓ Ticket #${lastTicket.num} añadido correctamente.`, 'success');
+  }
+}
+
+// El usuario descarta el ticket escaneado
+function descartarTicket() {
+  pendingTicket = null;
+  document.getElementById('validateCard').classList.add('hidden');
+  setSaveStatus("Ticket descartado.", '');
 }
 
 // Extracción heurística de fecha, comercio e importe
@@ -598,9 +742,11 @@ function renderTable() {
     wrap.innerHTML = '<div class="empty">Aún no hay tickets este mes.<br>Captura uno para empezar.</div>';
     return;
   }
-  // Ordenar por fecha
+  const cerrada = notaEstado === 'cerrada';
+  const dis = cerrada ? 'disabled' : '';
+  // Ordenar por número
   const sorted = tickets.map((t,i) => ({...t, _i: i}))
-    .sort((a,b) => (fechaSerial(a.fecha)||0) - (fechaSerial(b.fecha)||0));
+    .sort((a,b) => (a.num||0) - (b.num||0));
 
   let total = 0;
   tickets.forEach(t => { total += parseFloat(String(t.importe).replace(',','.')) || 0; });
@@ -618,24 +764,25 @@ function renderTable() {
     return `<div class="tkt-card">
       <div class="tkt-top">
         <div class="tkt-icon" style="background:${cat.color}22;color:${cat.color}">${cat.icon}</div>
+        <span class="tkt-num">#${t.num || '?'}</span>
         <input class="tkt-comercio" value="${escapeHtml(t.comercio)}" placeholder="Comercio"
           maxlength="40" oninput="this.value=limpiarConcepto(this.value)"
-          onchange="updateTicket(${i},'comercio',limpiarConcepto(this.value))">
-        <button class="tkt-del" onclick="removeTicket(${i})" title="Eliminar">✕</button>
+          onchange="updateTicket(${i},'comercio',limpiarConcepto(this.value))" ${dis}>
+        ${cerrada ? '' : `<button class="tkt-del" onclick="removeTicket(${i})" title="Eliminar">✕</button>`}
       </div>
       <div class="tkt-mid">
         <input type="date" class="tkt-fecha ${fechaFuera?'fuera-mes':''}" value="${fechaInput}"
           onchange="setFecha(${i},this.value)"
-          title="${fechaFuera?'⚠️ Fecha fuera del mes seleccionado':''}">
+          title="${fechaFuera?'⚠️ Fecha fuera del mes seleccionado':''}" ${dis}>
         <div class="tkt-importe-row">
           <input class="tkt-importe" inputmode="decimal" value="${formatearImporte(t.importe)}"
-            onchange="setImporte(${i},this.value)">
+            onchange="setImporte(${i},this.value)" ${dis}>
           <span class="tkt-euro">€</span>
         </div>
       </div>
       <div class="tkt-bottom">
-        <select class="tkt-select" onchange="updateTicket(${i},'categoria',this.value)">${opciones}</select>
-        <select class="tkt-select" onchange="updateTicket(${i},'formaPago',this.value)">${opcPago}</select>
+        <select class="tkt-select" onchange="updateTicket(${i},'categoria',this.value)" ${dis}>${opciones}</select>
+        <select class="tkt-select" onchange="updateTicket(${i},'formaPago',this.value)" ${dis}>${opcPago}</select>
         <button class="tkt-foto" onclick="verFoto('${i}')" title="Ver ticket">🖼</button>
         <img id="foto-${i}" src="${t.imageDataUrl}" style="display:none">
       </div>
@@ -675,6 +822,64 @@ function setImporte(i, val) { tickets[i].importe = limpiarImporte(val); renderTa
 function removeTicket(i) { tickets.splice(i,1); renderTable(); }
 function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
+// ---- ESTADO DE LA NOTA ----
+function actualizarEstadoUI() {
+  const cerrada = notaEstado === 'cerrada';
+  const bar = document.getElementById('notaEstadoBar');
+  bar.className = 'nota-estado ' + notaEstado;
+  document.getElementById('estadoTexto').textContent = cerrada ? 'Nota cerrada — no se puede editar' : 'Nota abierta — puedes añadir y editar tickets';
+  // Acciones: ocultar si cerrada
+  document.getElementById('accionesCard').classList.toggle('hidden', cerrada);
+  // Botones cerrar/abrir
+  document.getElementById('cerrarBtn').classList.toggle('hidden', cerrada);
+  document.getElementById('abrirBtn').classList.toggle('hidden', !cerrada);
+  // Selector de mes: deshabilitar si cerrada para evitar cambios accidentales
+  document.getElementById('monthPicker').disabled = cerrada;
+  renderTable();
+}
+
+async function cerrarNota() {
+  if (!tickets.length) {
+    document.getElementById('cerrarStatus').textContent = 'No hay tickets. Añade al menos uno antes de cerrar.';
+    document.getElementById('cerrarStatus').className = 'status error';
+    return;
+  }
+  // Verificar que todos los tickets tengan fecha e importe
+  const incompletos = tickets.filter(t => !t.fecha || !t.importe);
+  if (incompletos.length) {
+    document.getElementById('cerrarStatus').textContent = `Hay ${incompletos.length} ticket(s) sin fecha o importe. Completa todos los datos antes de cerrar.`;
+    document.getElementById('cerrarStatus').className = 'status error';
+    return;
+  }
+  if (!confirm('¿Cerrar la nota de gastos del mes? Se guardará y comenzará el flujo de aprobación.\n\nPuedes reabrirla después si necesitas corregir algo.')) return;
+
+  notaEstado = 'cerrada';
+  document.getElementById('cerrarStatus').textContent = 'Cerrando y guardando...';
+  document.getElementById('cerrarStatus').className = 'status';
+  try {
+    // Guardar con estado cerrada
+    await generateAndSave();
+    document.getElementById('cerrarStatus').textContent = '✓ Nota cerrada y guardada. El flujo de aprobación se iniciará próximamente.';
+    document.getElementById('cerrarStatus').className = 'status success';
+  } catch (e) {
+    document.getElementById('cerrarStatus').textContent = 'Error al cerrar: ' + e.message;
+    document.getElementById('cerrarStatus').className = 'status error';
+    notaEstado = 'abierta'; // revertir si falla
+  }
+  actualizarEstadoUI();
+}
+
+async function abrirNota() {
+  if (!confirm('¿Reabrir la nota para editarla? Se detendrá el flujo de aprobación si estaba en curso.')) return;
+  notaEstado = 'abierta';
+  document.getElementById('cerrarStatus').textContent = 'Nota reabierta. Puedes editar y volver a cerrar cuando esté lista.';
+  document.getElementById('cerrarStatus').className = 'status success';
+  try {
+    await generateAndSave();
+  } catch (e) { /* ignorar errores al reabrir, ya se guardará cuando cierre */ }
+  actualizarEstadoUI();
+}
+
 // ---- GENERAR Y GUARDAR EN ONEDRIVE/SHAREPOINT ----
 async function generateAndSave() {
   if (!tickets.length) { setSaveStatus("No hay tickets que guardar.", 'error'); return; }
@@ -689,11 +894,13 @@ async function generateAndSave() {
 
     // 1. Guardar primero los datos (datos.json e imágenes): nunca se bloquean
     setSaveStatus("Guardando datos y tickets...", '');
-    const datos = JSON.stringify({ month, tickets });
+    const datos = JSON.stringify({ month, tickets, estado: notaEstado });
     await uploadFile(`${folderPath}/datos.json`, new Blob([datos], {type:'application/json'}));
     for (let i = 0; i < tickets.length; i++) {
-      const blob = dataURLtoBlob(tickets[i].imageDataUrl);
-      await uploadFile(`${folderPath}/tickets/ticket-${i+1}-${tickets[i].id}.jpg`, blob);
+      const t = tickets[i];
+      const blob = dataURLtoBlob(t.imageDataUrl);
+      const numStr = String(t.num || i+1).padStart(2, '0');
+      await uploadFile(`${folderPath}/tickets/ticket-${numStr}.jpg`, blob);
     }
 
     // 2. Generar y subir el Excel. Si está abierto en Excel, dará bloqueo (423)
@@ -855,20 +1062,29 @@ async function loadMonth() {
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
     if (res.ok) {
       const data = await res.json();
+      // Cargar estado de la nota
+      notaEstado = data.estado || 'abierta';
+      // Cargar tickets con compatibilidad (asignar num y categoría/pago si faltan)
+      let nextNum = 1;
       tickets = (data.tickets || []).map(t => {
         const cat = t.categoria || detectarCategoria(t.texto);
-        return { ...t, categoria: cat, formaPago: t.formaPago || detectarFormaPago(cat) };
+        const num = t.num || nextNum;
+        nextNum = Math.max(nextNum, num) + 1;
+        return { ...t, num, categoria: cat, formaPago: t.formaPago || detectarFormaPago(cat) };
       });
-      renderTable();
+      actualizarEstadoUI();
       setSaveStatus(`Cargados ${tickets.length} tickets guardados de ${month}.`, 'success');
     } else if (res.status === 404) {
       tickets = [];
-      renderTable();
+      notaEstado = 'abierta';
+      actualizarEstadoUI();
       setSaveStatus(`No hay tickets guardados aún en ${month}. Empieza a capturar.`, '');
     } else {
       throw new Error('Graph ' + res.status);
     }
   } catch (e) {
+    notaEstado = 'abierta';
+    actualizarEstadoUI();
     setSaveStatus("No se pudieron cargar tickets previos: " + e.message, 'error');
   }
 }
