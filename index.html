@@ -1144,13 +1144,31 @@ async function loadMonth() {
 // ---- SHAREPOINT ----
 // Obtiene el site-id de SharePoint para usar en las APIs
 async function getSiteId() {
-  const url = `https://graph.microsoft.com/v1.0/sites/grupolopezguillensl.sharepoint.com:/sites/NotasdeGastos`;
-  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+  // Intentar formato 1: con path
+  let url = `https://graph.microsoft.com/v1.0/sites/grupolopezguillensl.sharepoint.com:/sites/NotasdeGastos:`;
+  let res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
   if (res.ok) {
     const data = await res.json();
+    console.log('SiteId obtenido (formato 1):', data.id);
     return data.id;
   }
-  throw new Error('No se pudo obtener site-id: ' + res.status);
+  console.warn('Formato 1 falló:', res.status, await res.text());
+  
+  // Intentar formato 2: búsqueda
+  url = `https://graph.microsoft.com/v1.0/sites?search=NotasdeGastos`;
+  res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+  if (res.ok) {
+    const data = await res.json();
+    if (data.value && data.value.length > 0) {
+      console.log('SiteId obtenido (búsqueda):', data.value[0].id);
+      return data.value[0].id;
+    }
+    console.warn('Búsqueda no devolvió resultados');
+  } else {
+    console.warn('Formato 2 falló:', res.status, await res.text());
+  }
+
+  throw new Error('No se pudo obtener site-id. Abre la consola del navegador (F12) para ver detalles.');
 }
 
 // Lee la lista de Aprobadores en SharePoint y devuelve los responsables del usuario actual
