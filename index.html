@@ -219,7 +219,7 @@
 <!-- APP -->
 <div id="appView" class="hidden">
   <header>
-    <h1>📋 Notas de Gastos</h1>
+    <h1>📋 Notas de Gastos <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:6px">v1.5</span></h1>
     <div class="user-info">
       <span id="userName"></span>
       <button class="btn-secondary" style="padding:6px 12px" onclick="signOut()">Salir</button>
@@ -1550,22 +1550,23 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
     console.log('PATCH paso 2 resultado — Estado guardado:', r2json.Estado, '| EmailEmpleado sigue:', r2json.EmailEmpleado);
     return existing.id;
   } else {
-    // POST /items — mismo formato que PATCH: Estado como string directo
-    const fields = {
+    // ESTRATEGIA DOS PASOS para evitar el problema del campo Choice en POST:
+    // Paso 1: crear el item solo con campos de texto (sin Estado)
+    // Paso 2: PATCH para añadir el Estado (que ya sabemos que funciona)
+    const fieldsTexto = {
       Title: `${account.name} - ${mes}`,
       EmailEmpleado: email,
       Mes: mes,
-      Estado: estado,          // string directo, igual que en PATCH
       PDFUrl: pdfUrl,
       ApprovalUrl: approvalUrl,
       MotivoRechazo: motivo
     };
-    console.log('POST fields:', JSON.stringify(fields));
+    console.log('POST paso 1 (sin Estado):', JSON.stringify(fieldsTexto));
     const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields })
+      body: JSON.stringify({ fields: fieldsTexto })
     });
     if (!res.ok) {
       const errText = await res.text();
@@ -1573,8 +1574,24 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
       throw new Error(`SharePoint create error ${res.status}: ${errText.slice(0,300)}`);
     }
     const data = await res.json();
-    console.log('Registro creado. id:', data.id, '| fields devueltos:', JSON.stringify(data.fields));
-    return data.id;
+    const newId = data.id;
+    console.log('Registro creado (paso 1). id:', newId, '| EmailEmpleado:', data.fields?.EmailEmpleado);
+
+    // Paso 2: PATCH para añadir el Estado (campo Choice — sabemos que funciona con PATCH)
+    const r2 = await fetch(`${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${newId}/fields`, {
+      method: 'PATCH',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ Estado: estado })
+    });
+    if (!r2.ok) {
+      const e2 = await r2.text();
+      console.error('SP PATCH Estado (paso 2) error:', r2.status, e2);
+      // No lanzamos error — el item ya está creado con email correcto
+    } else {
+      const r2json = await r2.json();
+      console.log('Estado añadido (paso 2):', r2json.Estado, '| EmailEmpleado sigue:', r2json.EmailEmpleado);
+    }
+    return newId;
   }
 }
 
