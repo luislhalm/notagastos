@@ -1550,12 +1550,12 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
     console.log('PATCH paso 2 resultado — Estado guardado:', r2json.Estado, '| EmailEmpleado sigue:', r2json.EmailEmpleado);
     return existing.id;
   } else {
-    // POST /items — Estado como { Value: "..." } para campo Choice
+    // POST /items — mismo formato que PATCH: Estado como string directo
     const fields = {
       Title: `${account.name} - ${mes}`,
       EmailEmpleado: email,
       Mes: mes,
-      Estado: { Value: estado },
+      Estado: estado,          // string directo, igual que en PATCH
       PDFUrl: pdfUrl,
       ApprovalUrl: approvalUrl,
       MotivoRechazo: motivo
