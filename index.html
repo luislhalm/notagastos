@@ -1492,27 +1492,27 @@ async function buscarRegistro(mes) {
 // Escribe o actualiza en la lista "Registro Notas".
 // Siempre hace upsert: si existe actualiza, si no existe crea.
 // IMPORTANTE: EmailEmpleado se fuerza siempre para corregir filas antiguas que lo tenían vacío.
+// Comportamiento Graph API SharePoint para campo Choice:
+//   - PATCH /items/{id}/fields  → Estado como STRING directo: "Cerrada"
+//   - POST  /items              → Estado como objeto:          { Value: "Cerrada" }
 async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', motivo = '') {
   const email = getUserEmail();
   if (!email) throw new Error('No se pudo obtener el email del usuario. Cierra sesión y vuelve a entrar.');
 
-  // Estado es tipo Choice en SP — hay que enviarlo como objeto {Value: "..."}
-  // EmailEmpleado es texto plano — se envía directamente como string
-  const fields = {
-    Title: `${account.name} - ${mes}`,
-    EmailEmpleado: email,
-    Mes: mes,
-    Estado: { Value: estado },   // ← Choice requiere objeto {Value}
-    PDFUrl: pdfUrl,
-    ApprovalUrl: approvalUrl,
-    MotivoRechazo: motivo
-  };
-
-  console.log('escribirEnRegistro → fields a enviar:', JSON.stringify(fields));
-
   const existing = await buscarRegistro(mes);
+  console.log('escribirEnRegistro → estado:', estado, '| email:', email, '| existing:', existing?.id || 'ninguno');
 
   if (existing) {
+    // PATCH /fields — Estado va como string
+    const fields = {
+      Title: `${account.name} - ${mes}`,
+      EmailEmpleado: email,
+      Mes: mes,
+      Estado: estado,          // ← string directo para PATCH /fields
+      PDFUrl: pdfUrl,
+      ApprovalUrl: approvalUrl,
+      MotivoRechazo: motivo
+    };
     const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existing.id}/fields`;
     const res = await fetch(url, {
       method: 'PATCH',
@@ -1525,9 +1525,19 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
       throw new Error(`SharePoint update error ${res.status}: ${errText.slice(0,300)}`);
     }
     const updated = await res.json();
-    console.log('Registro actualizado en SP. EmailEmpleado guardado:', updated.EmailEmpleado, '| Estado:', updated.Estado);
+    console.log('Registro actualizado. EmailEmpleado:', updated.EmailEmpleado, '| Estado:', updated.Estado);
     return existing.id;
   } else {
+    // POST /items — Estado va como { Value: "..." }
+    const fields = {
+      Title: `${account.name} - ${mes}`,
+      EmailEmpleado: email,
+      Mes: mes,
+      Estado: { Value: estado },  // ← objeto para POST /items
+      PDFUrl: pdfUrl,
+      ApprovalUrl: approvalUrl,
+      MotivoRechazo: motivo
+    };
     const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items`;
     const res = await fetch(url, {
       method: 'POST',
@@ -1540,7 +1550,7 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
       throw new Error(`SharePoint create error ${res.status}: ${errText.slice(0,300)}`);
     }
     const data = await res.json();
-    console.log('Registro creado en SP. EmailEmpleado guardado:', data.fields?.EmailEmpleado, '| Estado:', data.fields?.Estado);
+    console.log('Registro creado. EmailEmpleado:', data.fields?.EmailEmpleado, '| Estado:', data.fields?.Estado);
     return data.id;
   }
 }
@@ -1550,11 +1560,12 @@ async function actualizarEstadoSP(mes, estado) {
   try {
     const existing = await buscarRegistro(mes);
     if (existing) {
+      // PATCH /fields → Estado como string
       const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existing.id}/fields`;
       await fetch(url, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ Estado: { Value: estado }, EmailEmpleado: getUserEmail() })
+        body: JSON.stringify({ Estado: estado, EmailEmpleado: getUserEmail() })
       });
       console.log('Estado SP actualizado a:', estado, '(id:', existing.id, ')');
     } else {
