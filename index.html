@@ -178,9 +178,22 @@
   }
   .nota-estado.abierta { background: rgba(46,160,67,.1); border: 1px solid rgba(46,160,67,.3); color: var(--green); }
   .nota-estado.cerrada { background: rgba(218,54,51,.1); border: 1px solid rgba(218,54,51,.3); color: var(--red); }
+  .nota-estado.en-revision { background: rgba(47,129,247,.1); border: 1px solid rgba(47,129,247,.3); color: var(--accent); }
+  .nota-estado.aprobada { background: rgba(46,160,67,.2); border: 1px solid rgba(46,160,67,.5); color: #3fb950; }
+  .nota-estado.rechazada { background: rgba(218,54,51,.15); border: 1px solid rgba(218,54,51,.5); color: #f85149; }
   .nota-estado .estado-dot { width: 8px; height: 8px; border-radius: 50%; }
   .nota-estado.abierta .estado-dot { background: var(--green); }
   .nota-estado.cerrada .estado-dot { background: var(--red); }
+  .nota-estado.en-revision .estado-dot { background: var(--accent); }
+  .nota-estado.aprobada .estado-dot { background: #3fb950; }
+  .nota-estado.rechazada .estado-dot { background: #f85149; }
+  .rechazo-aviso {
+    background: rgba(218,54,51,.1); border: 1px solid rgba(218,54,51,.4); color: #f85149;
+    border-radius: 10px; padding: 12px 16px; font-size: 13px; margin-bottom: 16px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .rechazo-aviso strong { font-size: 14px; }
+  .rechazo-aviso .motivo { color: var(--text); background: var(--surface-2); border-radius: 6px; padding: 8px 10px; margin-top: 4px; font-style: italic; }
 
   /* Número de ticket en tarjeta */
   .tkt-num { font-size: 11px; color: var(--muted); background: var(--surface); border-radius: 6px; padding: 2px 7px; font-weight: 700; flex-shrink: 0; }
@@ -225,6 +238,13 @@
     <div id="notaEstadoBar" class="nota-estado abierta">
       <div class="estado-dot"></div>
       <span id="estadoTexto">Nota abierta</span>
+    </div>
+
+    <!-- BANNER RECHAZO (visible solo cuando fue rechazada) -->
+    <div id="rechazoAviso" class="rechazo-aviso hidden">
+      <strong>❌ Nota rechazada</strong>
+      <span>Motivo indicado por el revisor:</span>
+      <div class="motivo" id="rechazoMotivo"></div>
     </div>
 
     <!-- ACCIONES (solo visibles si nota abierta) -->
@@ -761,7 +781,7 @@ function renderTable() {
     wrap.innerHTML = '<div class="empty">Aún no hay tickets este mes.<br>Captura uno para empezar.</div>';
     return;
   }
-  const cerrada = notaEstado === 'cerrada';
+  const cerrada = notaEstado !== 'abierta';   // deshabilitar en cualquier estado que no sea abierta
   const dis = cerrada ? 'disabled' : '';
   // Ordenar por fecha (el número se mantiene para identificar cada ticket)
   const sorted = tickets.map((t,i) => ({...t, _i: i}))
@@ -844,18 +864,45 @@ function removeTicket(i) { tickets.splice(i,1); renderTable(); }
 function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 // ---- ESTADO DE LA NOTA ----
-function actualizarEstadoUI() {
-  const cerrada = notaEstado === 'cerrada';
+// notaEstado puede ser: 'abierta' | 'cerrada' | 'en revision' | 'aprobada' | 'rechazada'
+// Solo 'abierta' permite edición
+function actualizarEstadoUI(motivoRechazo) {
+  const editable = notaEstado === 'abierta';
   const bar = document.getElementById('notaEstadoBar');
-  bar.className = 'nota-estado ' + notaEstado;
-  document.getElementById('estadoTexto').textContent = cerrada ? 'Nota cerrada — no se puede editar' : 'Nota abierta — puedes añadir y editar tickets';
-  // Acciones: ocultar si cerrada
-  document.getElementById('accionesCard').classList.toggle('hidden', cerrada);
+
+  // Clase CSS (sin espacios para el selector)
+  const claseCSS = notaEstado.replace(/\s+/g, '-').toLowerCase()
+    .replace('en-revisión','en-revision').replace('revisión','en-revision')
+    .replace('en revision','en-revision');
+  bar.className = 'nota-estado ' + claseCSS;
+
+  const textos = {
+    'abierta':      'Nota abierta — puedes añadir y editar tickets',
+    'cerrada':      'Nota cerrada — pendiente de revisión',
+    'en revision':  'En revisión — esperando aprobación',
+    'en revisión':  'En revisión — esperando aprobación',
+    'aprobada':     '✓ Nota aprobada',
+    'rechazada':    '✗ Nota rechazada — reabre para corregir y volver a cerrar'
+  };
+  document.getElementById('estadoTexto').textContent = textos[notaEstado] || notaEstado;
+
+  // Acciones: solo si está abierta
+  document.getElementById('accionesCard').classList.toggle('hidden', !editable);
   // Botones cerrar/abrir
-  document.getElementById('cerrarBtn').classList.toggle('hidden', cerrada);
-  document.getElementById('abrirBtn').classList.toggle('hidden', !cerrada);
-  // Selector de mes: deshabilitar si cerrada para evitar cambios accidentales
-  document.getElementById('monthPicker').disabled = cerrada;
+  document.getElementById('cerrarBtn').classList.toggle('hidden', !editable);
+  document.getElementById('abrirBtn').classList.toggle('hidden', editable);
+  // Selector de mes: bloquear si no es editable
+  document.getElementById('monthPicker').disabled = !editable;
+
+  // Banner de rechazo
+  const avisoEl = document.getElementById('rechazoAviso');
+  if (notaEstado === 'rechazada' && motivoRechazo) {
+    document.getElementById('rechazoMotivo').textContent = motivoRechazo;
+    avisoEl.classList.remove('hidden');
+  } else {
+    avisoEl.classList.add('hidden');
+  }
+
   renderTable();
 }
 
@@ -930,20 +977,20 @@ async function cerrarNota() {
 }
 
 async function abrirNota() {
-  if (!confirm('¿Reabrir la nota para editarla? Se borrará el registro de cierre en SharePoint.')) return;
+  if (!confirm('¿Reabrir la nota para editarla? El estado en SharePoint pasará a "Abierta".')) return;
   const statusEl = document.getElementById('cerrarStatus');
   notaEstado = 'abierta';
   try {
     accessToken = await getToken();
-    statusEl.textContent = 'Borrando registro de SharePoint...';
+    statusEl.textContent = 'Actualizando estado en SharePoint...';
     statusEl.className = 'status';
     const mes = document.getElementById('monthPicker').value;
-    await borrarRegistro(mes);
+    await actualizarEstadoSP(mes, 'Abierta');
     await generateAndSave();
-    statusEl.textContent = '✓ Nota reabierta. Registro borrado de SharePoint. Puedes editar y volver a cerrar.';
+    statusEl.textContent = '✓ Nota reabierta. Estado actualizado en SharePoint. Puedes editar y volver a cerrar.';
     statusEl.className = 'status success';
   } catch (e) {
-    statusEl.textContent = 'Nota reabierta (error al borrar registro: ' + e.message + ')';
+    statusEl.textContent = 'Nota reabierta (error al actualizar SP: ' + e.message + ')';
     statusEl.className = 'status error';
   }
   actualizarEstadoUI();
@@ -1313,14 +1360,13 @@ async function loadMonth() {
   try {
     setSaveStatus("Cargando tickets guardados del mes...", '');
     accessToken = await getToken();
+
+    // 1. Cargar tickets desde OneDrive (datos.json)
     const path = `${FOLDER_NAME}/${month}/datos.json`;
     const url = `https://graph.microsoft.com/v1.0/me/drive/root:/${path.split('/').map(encodeURIComponent).join('/')}:/content`;
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
     if (res.ok) {
       const data = await res.json();
-      // Cargar estado de la nota
-      notaEstado = data.estado || 'abierta';
-      // Cargar tickets con compatibilidad (asignar num y categoría/pago si faltan)
       let nextNum = 1;
       tickets = (data.tickets || []).map(t => {
         const cat = t.categoria || detectarCategoria(t.texto);
@@ -1328,16 +1374,39 @@ async function loadMonth() {
         nextNum = Math.max(nextNum, num) + 1;
         return { ...t, num, categoria: cat, formaPago: t.formaPago || detectarFormaPago(cat), saved: true };
       });
-      actualizarEstadoUI();
-      setSaveStatus(`Cargados ${tickets.length} tickets guardados de ${month}.`, 'success');
     } else if (res.status === 404) {
       tickets = [];
-      notaEstado = 'abierta';
-      actualizarEstadoUI();
-      setSaveStatus(`No hay tickets guardados aún en ${month}. Empieza a capturar.`, '');
     } else {
-      throw new Error('Graph ' + res.status);
+      throw new Error('OneDrive ' + res.status);
     }
+
+    // 2. Leer estado REAL desde SharePoint (fuente de verdad para el estado)
+    let motivoRechazo = '';
+    try {
+      const registro = await buscarRegistro(month);
+      if (registro) {
+        const estadoSP = (registro.fields.Estado || '').toLowerCase();
+        notaEstado = estadoSP || 'abierta';
+        motivoRechazo = registro.fields.MotivoRechazo || '';
+        console.log('Estado leído de SP:', notaEstado, '| Motivo:', motivoRechazo);
+      } else {
+        // No hay registro en SP → la nota está abierta (o es nueva)
+        notaEstado = 'abierta';
+      }
+    } catch (spErr) {
+      // Si falla SP, usar el estado guardado en datos.json como fallback
+      console.warn('No se pudo leer SP, usando estado local:', spErr.message);
+      notaEstado = 'abierta';
+    }
+
+    actualizarEstadoUI(motivoRechazo);
+
+    if (tickets.length) {
+      setSaveStatus(`Cargados ${tickets.length} tickets. Estado: ${notaEstado}.`, 'success');
+    } else {
+      setSaveStatus(res?.status === 404 ? `No hay tickets guardados aún en ${month}. Empieza a capturar.` : `Sin tickets en ${month}.`, '');
+    }
+
   } catch (e) {
     notaEstado = 'abierta';
     actualizarEstadoUI();
@@ -1398,32 +1467,37 @@ async function getAprobadores(email) {
   }
 }
 
-// Escribe en la lista de Registro Notas cuando se cierra una nota
-// Busca un registro existente en la lista para este empleado+mes
+// Busca el registro de esta nota en SharePoint (empleado+mes).
+// Devuelve el objeto { id, fields } completo, o null si no existe.
 async function buscarRegistro(mes) {
   const email = getUserEmail();
-  const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items?$expand=fields&$top=50`;
+  const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items?$expand=fields&$top=100`;
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
   if (!res.ok) return null;
   const data = await res.json();
-  // Buscar la fila de este empleado+mes por email o por título
   const item = data.value.find(v => {
     const f = v.fields;
     if (f.Mes !== mes) return false;
     const empEmail = (f.EmailEmpleado || '').toLowerCase();
     const title = (f.Title || '').toLowerCase();
     const nombre = (account.name || '').toLowerCase();
-    return empEmail === email || title.includes(nombre) || title.includes(mes);
+    // Primero busca por email (más fiable), luego por nombre en el título
+    return empEmail === email || (empEmail === '' && (title.includes(nombre) || title.includes(mes)));
   });
-  if (item) console.log('Registro encontrado (id:', item.id, ')');
-  return item ? item.id : null;
+  if (item) console.log('Registro SP encontrado — id:', item.id, 'Estado:', item.fields.Estado, 'Email:', item.fields.EmailEmpleado);
+  return item || null;
 }
 
-// Escribe o actualiza en la lista de Registro Notas
+// Escribe o actualiza en la lista "Registro Notas".
+// Siempre hace upsert: si existe actualiza, si no existe crea.
+// IMPORTANTE: EmailEmpleado se fuerza siempre para corregir filas antiguas que lo tenían vacío.
 async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', motivo = '') {
+  const email = getUserEmail();
+  if (!email) throw new Error('No se pudo obtener el email del usuario. Cierra sesión y vuelve a entrar.');
+
   const fields = {
     Title: `${account.name} - ${mes}`,
-    EmailEmpleado: getUserEmail(),
+    EmailEmpleado: email,           // SIEMPRE explícito — corrige filas antiguas vacías
     Mes: mes,
     Estado: estado,
     PDFUrl: pdfUrl,
@@ -1431,12 +1505,10 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
     MotivoRechazo: motivo
   };
 
-  // Buscar si ya existe un registro para este empleado+mes
-  const existingId = await buscarRegistro(mes);
+  const existing = await buscarRegistro(mes);
 
-  if (existingId) {
-    // Actualizar fila existente
-    const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existingId}/fields`;
+  if (existing) {
+    const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existing.id}/fields`;
     const res = await fetch(url, {
       method: 'PATCH',
       headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -1446,10 +1518,9 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
       const errText = await res.text();
       throw new Error(`SharePoint update error ${res.status}: ${errText.slice(0,200)}`);
     }
-    console.log('Registro actualizado en SharePoint (id:', existingId, ')');
-    return existingId;
+    console.log('Registro actualizado en SP (id:', existing.id, ') Estado:', estado, 'Email:', email);
+    return existing.id;
   } else {
-    // Crear nueva fila
     const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items`;
     const res = await fetch(url, {
       method: 'POST',
@@ -1461,25 +1532,30 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
       throw new Error(`SharePoint create error ${res.status}: ${errText.slice(0,200)}`);
     }
     const data = await res.json();
-    console.log('Registro creado en SharePoint (id:', data.id, ')');
+    console.log('Registro creado en SP (id:', data.id, ') Estado:', estado, 'Email:', email);
     return data.id;
   }
 }
 
-// Borra el registro de la lista cuando se reabre la nota
-async function borrarRegistro(mes) {
+// Al reabrir la nota: cambia el Estado a "Abierta" en SP (no borra la fila)
+async function actualizarEstadoSP(mes, estado) {
   try {
-    const existingId = await buscarRegistro(mes);
-    if (existingId) {
-      const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existingId}`;
+    const existing = await buscarRegistro(mes);
+    if (existing) {
+      const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existing.id}/fields`;
       await fetch(url, {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${accessToken}` }
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Estado: estado, EmailEmpleado: getUserEmail() })
       });
-      console.log('Registro borrado de SharePoint (id:', existingId, ')');
+      console.log('Estado SP actualizado a:', estado, '(id:', existing.id, ')');
+    } else {
+      // No existe aún — crear fila mínima para dejar rastro
+      await escribirEnRegistro(mes, estado);
     }
   } catch (e) {
-    console.warn('No se pudo borrar el registro:', e.message);
+    console.warn('No se pudo actualizar estado en SP:', e.message);
+    throw e;
   }
 }
 
