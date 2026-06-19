@@ -1472,6 +1472,26 @@ async function getAprobadores(email) {
 // Devuelve el objeto { id, fields } completo, o null si no existe.
 async function buscarRegistro(mes) {
   const email = getUserEmail();
+
+  // DIAGNÓSTICO una sola vez: nombre interno real de cada columna
+  if (!buscarRegistro._diagnosticado) {
+    buscarRegistro._diagnosticado = true;
+    try {
+      const colRes = await fetch(`${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/columns`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      if (colRes.ok) {
+        const colData = await colRes.json();
+        console.log('=== COLUMNAS INTERNAS Registro Notas ===');
+        colData.value.forEach(c => {
+          const tipo = c.text ? 'text' : c.choice ? 'choice' : c.dateTime ? 'dateTime' : 'otro';
+          console.log(`  "${c.displayName}" → nombre interno API: "${c.name}" (${tipo})`);
+        });
+        console.log('========================================');
+      }
+    } catch(e) { console.warn('No se pudo leer columnas:', e.message); }
+  }
+
   const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items?$expand=fields&$top=100`;
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
   if (!res.ok) return null;
