@@ -1385,6 +1385,7 @@ async function loadMonth() {
     try {
       const registro = await buscarRegistro(month);
       if (registro) {
+        // Estado es tipo Choice → SP devuelve string directamente en Graph API al leer
         const estadoSP = (registro.fields.Estado || '').toLowerCase();
         notaEstado = estadoSP || 'abierta';
         motivoRechazo = registro.fields.MotivoRechazo || '';
@@ -1495,15 +1496,19 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
   const email = getUserEmail();
   if (!email) throw new Error('No se pudo obtener el email del usuario. Cierra sesión y vuelve a entrar.');
 
+  // Estado es tipo Choice en SP — hay que enviarlo como objeto {Value: "..."}
+  // EmailEmpleado es texto plano — se envía directamente como string
   const fields = {
     Title: `${account.name} - ${mes}`,
-    EmailEmpleado: email,           // SIEMPRE explícito — corrige filas antiguas vacías
+    EmailEmpleado: email,
     Mes: mes,
-    Estado: estado,
+    Estado: { Value: estado },   // ← Choice requiere objeto {Value}
     PDFUrl: pdfUrl,
     ApprovalUrl: approvalUrl,
     MotivoRechazo: motivo
   };
+
+  console.log('escribirEnRegistro → fields a enviar:', JSON.stringify(fields));
 
   const existing = await buscarRegistro(mes);
 
@@ -1516,9 +1521,11 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
     });
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`SharePoint update error ${res.status}: ${errText.slice(0,200)}`);
+      console.error('SP PATCH error:', res.status, errText);
+      throw new Error(`SharePoint update error ${res.status}: ${errText.slice(0,300)}`);
     }
-    console.log('Registro actualizado en SP (id:', existing.id, ') Estado:', estado, 'Email:', email);
+    const updated = await res.json();
+    console.log('Registro actualizado en SP. EmailEmpleado guardado:', updated.EmailEmpleado, '| Estado:', updated.Estado);
     return existing.id;
   } else {
     const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items`;
@@ -1529,10 +1536,11 @@ async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', mo
     });
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`SharePoint create error ${res.status}: ${errText.slice(0,200)}`);
+      console.error('SP POST error:', res.status, errText);
+      throw new Error(`SharePoint create error ${res.status}: ${errText.slice(0,300)}`);
     }
     const data = await res.json();
-    console.log('Registro creado en SP (id:', data.id, ') Estado:', estado, 'Email:', email);
+    console.log('Registro creado en SP. EmailEmpleado guardado:', data.fields?.EmailEmpleado, '| Estado:', data.fields?.Estado);
     return data.id;
   }
 }
@@ -1546,7 +1554,7 @@ async function actualizarEstadoSP(mes, estado) {
       await fetch(url, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ Estado: estado, EmailEmpleado: getUserEmail() })
+        body: JSON.stringify({ Estado: { Value: estado }, EmailEmpleado: getUserEmail() })
       });
       console.log('Estado SP actualizado a:', estado, '(id:', existing.id, ')');
     } else {
