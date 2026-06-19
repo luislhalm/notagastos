@@ -348,6 +348,7 @@ const SP_LIST_APROBADORES = "f5a2da35-c8d2-4ce0-8a53-44e54dd99940";
 const SP_LIST_REGISTRO = "6270c422-5183-4224-bcc9-211ac8156822";
 const EMAIL_ELENA = "luis.lopez@grupolopezguillen.com";      // Revisora de tickets
 const EMAIL_ILDEFONSO = "luis.lopez@grupolopezguillen.com";  // Para adjuntar en ERP
+const EMAIL_ADMIN_FLOW = "luis.lopez@grupolopezguillen.com"; // Acceso al PDF para Power Automate
 const GRAPH_SCOPES = ["User.Read", "Files.ReadWrite", "Sites.ReadWrite.All"];
 
 /* Categorías de gasto -> columna del Excel (fila destino 8..35)
@@ -955,18 +956,16 @@ async function cerrarNota() {
     const pdfSize = (pdfBlob.size / 1024).toFixed(0);
     console.log(`PDF generado: ${pdfSize} KB`);
 
-    // 4. Subir PDF a SharePoint (carpeta por empleado/mes)
-    statusEl.textContent = 'Subiendo PDF a SharePoint...';
+    // 4. Subir PDF al OneDrive del empleado y compartir con admin del flujo
+    statusEl.textContent = 'Subiendo PDF a OneDrive...';
     const mes = document.getElementById('monthPicker').value;
-    const emailUser = getUserEmail().replace('@', '_at_');
-    const spPath = `${emailUser}/${mes}/nota-gastos-${mes}.pdf`;
-    const pdfUrl = await uploadToSharePoint(spPath, pdfBlob);
+    const pdfUrl = await uploadPDFToOneDrive(mes, pdfBlob);
 
-    // 5. Escribir en SharePoint con la URL del PDF
+    // 5. Registrar en SharePoint con la URL del PDF
     statusEl.textContent = 'Registrando en SharePoint...';
     await escribirEnRegistro(mes, 'Cerrada', pdfUrl);
 
-    statusEl.textContent = `✓ Nota cerrada. PDF (${pdfSize} KB) en SharePoint. Aprobadores: ${aprobadores.responsable1 || 'ninguno'}${aprobadores.responsable2 ? ' → ' + aprobadores.responsable2 : ''}`;
+    statusEl.textContent = `✓ Nota cerrada. PDF (${pdfSize} KB) en OneDrive. Aprobadores: ${aprobadores.responsable1 || 'ninguno'}${aprobadores.responsable2 ? ' → ' + aprobadores.responsable2 : ''}`;
     statusEl.className = 'status success';
   } catch (e) {
     statusEl.textContent = 'Error al cerrar: ' + e.message;
@@ -1637,40 +1636,53 @@ async function actualizarEstadoSP(mes, estado) {
   }
 }
 
-// Sube un archivo a la biblioteca de documentos del sitio SharePoint
-let spSiteId = null;
-async function getSharePointSiteId() {
-  if (spSiteId) return spSiteId;
-  const url = `${SP_GRAPH_BASE}`;
-  console.log('Obteniendo site info de:', url);
-  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
-  if (!res.ok) throw new Error('No se pudo obtener site info: ' + res.status);
-  const data = await res.json();
-  spSiteId = data.id;
-  console.log('SharePoint site ID:', spSiteId);
-  return spSiteId;
-}
+// Sube el PDF al OneDrive del empleado y lo comparte con el admin (para Power Automate)
+// Ruta: Notas de Gastos/YYYY-MM/nota-gastos-YYYY-MM.pdf
+async function uploadPDFToOneDrive(mes, blob) {
+  const emailUser = getUserEmail().replace('@', '_at_');
+  const path = `${FOLDER_NAME}/${mes}/nota-gastos-${mes}.pdf`;
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const uploadUrl = `https://graph.microsoft.com/v1.0/me/drive/root:/${encodedPath}:/content`;
 
-async function uploadToSharePoint(filePath, blob) {
-  const siteId = await getSharePointSiteId();
-  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
-  const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${encodedPath}:/content`;
-  console.log('Upload URL:', url);
-  const res = await fetch(url, {
+  console.log('Subiendo PDF a OneDrive:', uploadUrl);
+  const res = await fetch(uploadUrl, {
     method: 'PUT',
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': blob.type || 'application/octet-stream'
-    },
+    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/pdf' },
     body: blob
   });
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`SharePoint upload error ${res.status}: ${errText.slice(0,200)}`);
+    throw new Error(`OneDrive PDF upload error ${res.status}: ${errText.slice(0,200)}`);
   }
   const data = await res.json();
-  console.log('Archivo subido a SharePoint:', data.webUrl);
-  return data.webUrl;
+  const itemId = data.id;
+  const webUrl = data.webUrl;
+  console.log('PDF subido a OneDrive. itemId:', itemId, '| URL:', webUrl);
+
+  // Compartir con el admin (EMAIL_ILDEFONSO o luis.lopez) para que Power Automate pueda acceder
+  try {
+    const shareUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${itemId}/invite`;
+    const shareRes = await fetch(shareUrl, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recipients: [{ email: EMAIL_ADMIN_FLOW }],
+        roles: ['read'],
+        sendInvitation: false,
+        requireSignIn: true
+      })
+    });
+    if (shareRes.ok) {
+      console.log('PDF compartido con:', EMAIL_ADMIN_FLOW);
+    } else {
+      const shareErr = await shareRes.text();
+      console.warn('No se pudo compartir PDF (no crítico):', shareRes.status, shareErr.slice(0,200));
+    }
+  } catch(e) {
+    console.warn('Error al compartir PDF (no crítico):', e.message);
+  }
+
+  return webUrl;
 }
 
 async function uploadFile(path, blob) {
