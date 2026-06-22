@@ -178,22 +178,9 @@
   }
   .nota-estado.abierta { background: rgba(46,160,67,.1); border: 1px solid rgba(46,160,67,.3); color: var(--green); }
   .nota-estado.cerrada { background: rgba(218,54,51,.1); border: 1px solid rgba(218,54,51,.3); color: var(--red); }
-  .nota-estado.en-revision { background: rgba(47,129,247,.1); border: 1px solid rgba(47,129,247,.3); color: var(--accent); }
-  .nota-estado.aprobada { background: rgba(46,160,67,.2); border: 1px solid rgba(46,160,67,.5); color: #3fb950; }
-  .nota-estado.rechazada { background: rgba(218,54,51,.15); border: 1px solid rgba(218,54,51,.5); color: #f85149; }
   .nota-estado .estado-dot { width: 8px; height: 8px; border-radius: 50%; }
   .nota-estado.abierta .estado-dot { background: var(--green); }
   .nota-estado.cerrada .estado-dot { background: var(--red); }
-  .nota-estado.en-revision .estado-dot { background: var(--accent); }
-  .nota-estado.aprobada .estado-dot { background: #3fb950; }
-  .nota-estado.rechazada .estado-dot { background: #f85149; }
-  .rechazo-aviso {
-    background: rgba(218,54,51,.1); border: 1px solid rgba(218,54,51,.4); color: #f85149;
-    border-radius: 10px; padding: 12px 16px; font-size: 13px; margin-bottom: 16px;
-    display: flex; flex-direction: column; gap: 4px;
-  }
-  .rechazo-aviso strong { font-size: 14px; }
-  .rechazo-aviso .motivo { color: var(--text); background: var(--surface-2); border-radius: 6px; padding: 8px 10px; margin-top: 4px; font-style: italic; }
 
   /* Número de ticket en tarjeta */
   .tkt-num { font-size: 11px; color: var(--muted); background: var(--surface); border-radius: 6px; padding: 2px 7px; font-weight: 700; flex-shrink: 0; }
@@ -219,7 +206,7 @@
 <!-- APP -->
 <div id="appView" class="hidden">
   <header>
-    <h1>📋 Notas de Gastos <span style="font-size:11px;color:var(--muted);font-weight:400;margin-left:6px">v1.5</span></h1>
+    <h1>📋 Notas de Gastos</h1>
     <div class="user-info">
       <span id="userName"></span>
       <button class="btn-secondary" style="padding:6px 12px" onclick="signOut()">Salir</button>
@@ -238,13 +225,6 @@
     <div id="notaEstadoBar" class="nota-estado abierta">
       <div class="estado-dot"></div>
       <span id="estadoTexto">Nota abierta</span>
-    </div>
-
-    <!-- BANNER RECHAZO (visible solo cuando fue rechazada) -->
-    <div id="rechazoAviso" class="rechazo-aviso hidden">
-      <strong>❌ Nota rechazada</strong>
-      <span>Motivo indicado por el revisor:</span>
-      <div class="motivo" id="rechazoMotivo"></div>
     </div>
 
     <!-- ACCIONES (solo visibles si nota abierta) -->
@@ -348,7 +328,6 @@ const SP_LIST_APROBADORES = "f5a2da35-c8d2-4ce0-8a53-44e54dd99940";
 const SP_LIST_REGISTRO = "6270c422-5183-4224-bcc9-211ac8156822";
 const EMAIL_ELENA = "luis.lopez@grupolopezguillen.com";      // Revisora de tickets
 const EMAIL_ILDEFONSO = "luis.lopez@grupolopezguillen.com";  // Para adjuntar en ERP
-const EMAIL_ADMIN_FLOW = "luis.lopez@grupolopezguillen.com"; // Acceso al PDF para Power Automate
 const GRAPH_SCOPES = ["User.Read", "Files.ReadWrite", "Sites.ReadWrite.All"];
 
 /* Categorías de gasto -> columna del Excel (fila destino 8..35)
@@ -782,7 +761,7 @@ function renderTable() {
     wrap.innerHTML = '<div class="empty">Aún no hay tickets este mes.<br>Captura uno para empezar.</div>';
     return;
   }
-  const cerrada = notaEstado !== 'abierta';   // deshabilitar en cualquier estado que no sea abierta
+  const cerrada = notaEstado === 'cerrada';
   const dis = cerrada ? 'disabled' : '';
   // Ordenar por fecha (el número se mantiene para identificar cada ticket)
   const sorted = tickets.map((t,i) => ({...t, _i: i}))
@@ -865,45 +844,18 @@ function removeTicket(i) { tickets.splice(i,1); renderTable(); }
 function escapeHtml(s){return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 // ---- ESTADO DE LA NOTA ----
-// notaEstado puede ser: 'abierta' | 'cerrada' | 'en revision' | 'aprobada' | 'rechazada'
-// Solo 'abierta' permite edición
-function actualizarEstadoUI(motivoRechazo) {
-  const editable = notaEstado === 'abierta';
+function actualizarEstadoUI() {
+  const cerrada = notaEstado === 'cerrada';
   const bar = document.getElementById('notaEstadoBar');
-
-  // Clase CSS (sin espacios para el selector)
-  const claseCSS = notaEstado.replace(/\s+/g, '-').toLowerCase()
-    .replace('en-revisión','en-revision').replace('revisión','en-revision')
-    .replace('en revision','en-revision');
-  bar.className = 'nota-estado ' + claseCSS;
-
-  const textos = {
-    'abierta':      'Nota abierta — puedes añadir y editar tickets',
-    'cerrada':      'Nota cerrada — pendiente de revisión',
-    'en revision':  'En revisión — esperando aprobación',
-    'en revisión':  'En revisión — esperando aprobación',
-    'aprobada':     '✓ Nota aprobada',
-    'rechazada':    '✗ Nota rechazada — reabre para corregir y volver a cerrar'
-  };
-  document.getElementById('estadoTexto').textContent = textos[notaEstado] || notaEstado;
-
-  // Acciones: solo si está abierta
-  document.getElementById('accionesCard').classList.toggle('hidden', !editable);
+  bar.className = 'nota-estado ' + notaEstado;
+  document.getElementById('estadoTexto').textContent = cerrada ? 'Nota cerrada — no se puede editar' : 'Nota abierta — puedes añadir y editar tickets';
+  // Acciones: ocultar si cerrada
+  document.getElementById('accionesCard').classList.toggle('hidden', cerrada);
   // Botones cerrar/abrir
-  document.getElementById('cerrarBtn').classList.toggle('hidden', !editable);
-  document.getElementById('abrirBtn').classList.toggle('hidden', editable);
-  // Selector de mes: bloquear si no es editable
-  document.getElementById('monthPicker').disabled = !editable;
-
-  // Banner de rechazo
-  const avisoEl = document.getElementById('rechazoAviso');
-  if (notaEstado === 'rechazada' && motivoRechazo) {
-    document.getElementById('rechazoMotivo').textContent = motivoRechazo;
-    avisoEl.classList.remove('hidden');
-  } else {
-    avisoEl.classList.add('hidden');
-  }
-
+  document.getElementById('cerrarBtn').classList.toggle('hidden', cerrada);
+  document.getElementById('abrirBtn').classList.toggle('hidden', !cerrada);
+  // Selector de mes: deshabilitar si cerrada para evitar cambios accidentales
+  document.getElementById('monthPicker').disabled = cerrada;
   renderTable();
 }
 
@@ -956,16 +908,18 @@ async function cerrarNota() {
     const pdfSize = (pdfBlob.size / 1024).toFixed(0);
     console.log(`PDF generado: ${pdfSize} KB`);
 
-    // 4. Subir PDF al OneDrive del empleado y compartir con admin del flujo
-    statusEl.textContent = 'Subiendo PDF a OneDrive...';
+    // 4. Subir PDF a SharePoint (carpeta por empleado/mes)
+    statusEl.textContent = 'Subiendo PDF a SharePoint...';
     const mes = document.getElementById('monthPicker').value;
-    const pdfUrl = await uploadPDFToOneDrive(mes, pdfBlob);
+    const emailUser = getUserEmail().replace('@', '_at_');
+    const spPath = `${emailUser}/${mes}/nota-gastos-${mes}.pdf`;
+    const pdfUrl = await uploadToSharePoint(spPath, pdfBlob);
 
-    // 5. Registrar en SharePoint con la URL del PDF
+    // 5. Escribir en SharePoint con la URL del PDF
     statusEl.textContent = 'Registrando en SharePoint...';
     await escribirEnRegistro(mes, 'Cerrada', pdfUrl);
 
-    statusEl.textContent = `✓ Nota cerrada. PDF (${pdfSize} KB) en OneDrive. Aprobadores: ${aprobadores.responsable1 || 'ninguno'}${aprobadores.responsable2 ? ' → ' + aprobadores.responsable2 : ''}`;
+    statusEl.textContent = `✓ Nota cerrada. PDF (${pdfSize} KB) en SharePoint. Aprobadores: ${aprobadores.responsable1 || 'ninguno'}${aprobadores.responsable2 ? ' → ' + aprobadores.responsable2 : ''}`;
     statusEl.className = 'status success';
   } catch (e) {
     statusEl.textContent = 'Error al cerrar: ' + e.message;
@@ -976,20 +930,20 @@ async function cerrarNota() {
 }
 
 async function abrirNota() {
-  if (!confirm('¿Reabrir la nota para editarla? El estado en SharePoint pasará a "Abierta".')) return;
+  if (!confirm('¿Reabrir la nota para editarla? Se borrará el registro de cierre en SharePoint.')) return;
   const statusEl = document.getElementById('cerrarStatus');
   notaEstado = 'abierta';
   try {
     accessToken = await getToken();
-    statusEl.textContent = 'Actualizando estado en SharePoint...';
+    statusEl.textContent = 'Borrando registro de SharePoint...';
     statusEl.className = 'status';
     const mes = document.getElementById('monthPicker').value;
-    await actualizarEstadoSP(mes, 'Abierta');
+    await borrarRegistro(mes);
     await generateAndSave();
-    statusEl.textContent = '✓ Nota reabierta. Estado actualizado en SharePoint. Puedes editar y volver a cerrar.';
+    statusEl.textContent = '✓ Nota reabierta. Registro borrado de SharePoint. Puedes editar y volver a cerrar.';
     statusEl.className = 'status success';
   } catch (e) {
-    statusEl.textContent = 'Nota reabierta (error al actualizar SP: ' + e.message + ')';
+    statusEl.textContent = 'Nota reabierta (error al borrar registro: ' + e.message + ')';
     statusEl.className = 'status error';
   }
   actualizarEstadoUI();
@@ -1359,13 +1313,14 @@ async function loadMonth() {
   try {
     setSaveStatus("Cargando tickets guardados del mes...", '');
     accessToken = await getToken();
-
-    // 1. Cargar tickets desde OneDrive (datos.json)
     const path = `${FOLDER_NAME}/${month}/datos.json`;
     const url = `https://graph.microsoft.com/v1.0/me/drive/root:/${path.split('/').map(encodeURIComponent).join('/')}:/content`;
     const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
     if (res.ok) {
       const data = await res.json();
+      // Cargar estado de la nota
+      notaEstado = data.estado || 'abierta';
+      // Cargar tickets con compatibilidad (asignar num y categoría/pago si faltan)
       let nextNum = 1;
       tickets = (data.tickets || []).map(t => {
         const cat = t.categoria || detectarCategoria(t.texto);
@@ -1373,40 +1328,16 @@ async function loadMonth() {
         nextNum = Math.max(nextNum, num) + 1;
         return { ...t, num, categoria: cat, formaPago: t.formaPago || detectarFormaPago(cat), saved: true };
       });
+      actualizarEstadoUI();
+      setSaveStatus(`Cargados ${tickets.length} tickets guardados de ${month}.`, 'success');
     } else if (res.status === 404) {
       tickets = [];
-    } else {
-      throw new Error('OneDrive ' + res.status);
-    }
-
-    // 2. Leer estado REAL desde SharePoint (fuente de verdad para el estado)
-    let motivoRechazo = '';
-    try {
-      const registro = await buscarRegistro(month);
-      if (registro) {
-        // Estado es tipo Choice → SP devuelve string directamente en Graph API al leer
-        const estadoSP = (registro.fields.Estado || '').toLowerCase();
-        notaEstado = estadoSP || 'abierta';
-        motivoRechazo = registro.fields.MotivoRechazo || '';
-        console.log('Estado leído de SP:', notaEstado, '| Motivo:', motivoRechazo);
-      } else {
-        // No hay registro en SP → la nota está abierta (o es nueva)
-        notaEstado = 'abierta';
-      }
-    } catch (spErr) {
-      // Si falla SP, usar el estado guardado en datos.json como fallback
-      console.warn('No se pudo leer SP, usando estado local:', spErr.message);
       notaEstado = 'abierta';
-    }
-
-    actualizarEstadoUI(motivoRechazo);
-
-    if (tickets.length) {
-      setSaveStatus(`Cargados ${tickets.length} tickets. Estado: ${notaEstado}.`, 'success');
+      actualizarEstadoUI();
+      setSaveStatus(`No hay tickets guardados aún en ${month}. Empieza a capturar.`, '');
     } else {
-      setSaveStatus(res?.status === 404 ? `No hay tickets guardados aún en ${month}. Empieza a capturar.` : `Sin tickets en ${month}.`, '');
+      throw new Error('Graph ' + res.status);
     }
-
   } catch (e) {
     notaEstado = 'abierta';
     actualizarEstadoUI();
@@ -1467,222 +1398,125 @@ async function getAprobadores(email) {
   }
 }
 
-// Busca el registro de esta nota en SharePoint (empleado+mes).
-// Devuelve el objeto { id, fields } completo, o null si no existe.
+// Escribe en la lista de Registro Notas cuando se cierra una nota
+// Busca un registro existente en la lista para este empleado+mes
 async function buscarRegistro(mes) {
   const email = getUserEmail();
-
-  // DIAGNÓSTICO una sola vez: nombre interno real de cada columna
-  if (!buscarRegistro._diagnosticado) {
-    buscarRegistro._diagnosticado = true;
-    try {
-      const colRes = await fetch(`${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/columns`, {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      });
-      if (colRes.ok) {
-        const colData = await colRes.json();
-        console.log('=== COLUMNAS INTERNAS Registro Notas ===');
-        colData.value.forEach(c => {
-          const tipo = c.text ? 'text' : c.choice ? 'choice' : c.dateTime ? 'dateTime' : 'otro';
-          console.log(`  "${c.displayName}" → nombre interno API: "${c.name}" (${tipo})`);
-        });
-        console.log('========================================');
-      }
-    } catch(e) { console.warn('No se pudo leer columnas:', e.message); }
-  }
-
-  const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items?$expand=fields&$top=100`;
+  const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items?$expand=fields&$top=50`;
   const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
   if (!res.ok) return null;
   const data = await res.json();
-
-  // Log de diagnóstico: muestra todos los campos disponibles del primer item
-  if (data.value.length > 0) {
-    console.log('DIAGNÓSTICO — campos disponibles en Registro Notas:', Object.keys(data.value[0].fields));
-    console.log('DIAGNÓSTICO — valores del primer item:', JSON.stringify(data.value[0].fields, null, 2));
-  }
-
+  // Buscar la fila de este empleado+mes por email o por título
   const item = data.value.find(v => {
     const f = v.fields;
     if (f.Mes !== mes) return false;
     const empEmail = (f.EmailEmpleado || '').toLowerCase();
     const title = (f.Title || '').toLowerCase();
     const nombre = (account.name || '').toLowerCase();
-    return empEmail === email || (empEmail === '' && (title.includes(nombre) || title.includes(mes)));
+    return empEmail === email || title.includes(nombre) || title.includes(mes);
   });
-  if (item) console.log('Registro SP encontrado — id:', item.id, '| Todos los fields:', JSON.stringify(item.fields));
-  return item || null;
+  if (item) console.log('Registro encontrado (id:', item.id, ')');
+  return item ? item.id : null;
 }
 
-// Escribe o actualiza en la lista "Registro Notas".
-// Siempre hace upsert: si existe actualiza, si no existe crea.
-// IMPORTANTE: EmailEmpleado se fuerza siempre para corregir filas antiguas que lo tenían vacío.
-// Comportamiento Graph API SharePoint para campo Choice:
-//   - PATCH /items/{id}         → fields anidado, Estado como STRING: "Cerrada"
-//   - POST  /items              → fields anidado, Estado como objeto:  { Value: "Cerrada" }
+// Escribe o actualiza en la lista de Registro Notas
 async function escribirEnRegistro(mes, estado, pdfUrl = '', approvalUrl = '', motivo = '') {
-  const email = getUserEmail();
-  if (!email) throw new Error('No se pudo obtener el email del usuario. Cierra sesión y vuelve a entrar.');
+  const fields = {
+    Title: `${account.name} - ${mes}`,
+    EmailEmpleado: getUserEmail(),
+    Mes: mes,
+    Estado: estado,
+    PDFUrl: pdfUrl,
+    ApprovalUrl: approvalUrl,
+    MotivoRechazo: motivo
+  };
 
-  const existing = await buscarRegistro(mes);
-  console.log('escribirEnRegistro → estado:', estado, '| email:', email, '| existing id:', existing?.id || 'ninguno');
+  // Buscar si ya existe un registro para este empleado+mes
+  const existingId = await buscarRegistro(mes);
 
-  const fieldsUrl = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existing?.id}/fields`;
-
-  if (existing) {
-    // PASO 1: PATCH de campos de texto (sin el Choice — lo mandamos separado)
-    const camposTexto = {
-      Title: `${account.name} - ${mes}`,
-      EmailEmpleado: email,
-      Mes: mes,
-      PDFUrl: pdfUrl,
-      ApprovalUrl: approvalUrl,
-      MotivoRechazo: motivo
-    };
-    console.log('PATCH paso 1 (texto):', JSON.stringify(camposTexto));
-    const r1 = await fetch(fieldsUrl, {
+  if (existingId) {
+    // Actualizar fila existente
+    const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existingId}/fields`;
+    const res = await fetch(url, {
       method: 'PATCH',
       headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(camposTexto)
+      body: JSON.stringify(fields)
     });
-    if (!r1.ok) {
-      const e1 = await r1.text();
-      console.error('SP PATCH texto error:', r1.status, e1);
-      throw new Error(`SharePoint update (texto) error ${r1.status}: ${e1.slice(0,300)}`);
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`SharePoint update error ${res.status}: ${errText.slice(0,200)}`);
     }
-    const r1json = await r1.json();
-    console.log('PATCH paso 1 resultado — EmailEmpleado guardado:', r1json.EmailEmpleado);
-
-    // PASO 2: PATCH del campo Choice por separado
-    console.log('PATCH paso 2 (Choice Estado):', estado);
-    const r2 = await fetch(fieldsUrl, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ Estado: estado })
-    });
-    if (!r2.ok) {
-      const e2 = await r2.text();
-      console.error('SP PATCH Choice error:', r2.status, e2);
-      throw new Error(`SharePoint update (Estado) error ${r2.status}: ${e2.slice(0,300)}`);
-    }
-    const r2json = await r2.json();
-    console.log('PATCH paso 2 resultado — Estado guardado:', r2json.Estado, '| EmailEmpleado sigue:', r2json.EmailEmpleado);
-    return existing.id;
+    console.log('Registro actualizado en SharePoint (id:', existingId, ')');
+    return existingId;
   } else {
-    // ESTRATEGIA DOS PASOS para evitar el problema del campo Choice en POST:
-    // Paso 1: crear el item solo con campos de texto (sin Estado)
-    // Paso 2: PATCH para añadir el Estado (que ya sabemos que funciona)
-    const fieldsTexto = {
-      Title: `${account.name} - ${mes}`,
-      EmailEmpleado: email,
-      Mes: mes,
-      PDFUrl: pdfUrl,
-      ApprovalUrl: approvalUrl,
-      MotivoRechazo: motivo
-    };
-    console.log('POST paso 1 (sin Estado):', JSON.stringify(fieldsTexto));
+    // Crear nueva fila
     const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items`;
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fields: fieldsTexto })
+      body: JSON.stringify({ fields })
     });
     if (!res.ok) {
       const errText = await res.text();
-      console.error('SP POST error:', res.status, errText);
-      throw new Error(`SharePoint create error ${res.status}: ${errText.slice(0,300)}`);
+      throw new Error(`SharePoint create error ${res.status}: ${errText.slice(0,200)}`);
     }
     const data = await res.json();
-    const newId = data.id;
-    console.log('Registro creado (paso 1). id:', newId, '| EmailEmpleado:', data.fields?.EmailEmpleado);
-
-    // Paso 2: PATCH para añadir el Estado (campo Choice — sabemos que funciona con PATCH)
-    const r2 = await fetch(`${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${newId}/fields`, {
-      method: 'PATCH',
-      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ Estado: estado })
-    });
-    if (!r2.ok) {
-      const e2 = await r2.text();
-      console.error('SP PATCH Estado (paso 2) error:', r2.status, e2);
-      // No lanzamos error — el item ya está creado con email correcto
-    } else {
-      const r2json = await r2.json();
-      console.log('Estado añadido (paso 2):', r2json.Estado, '| EmailEmpleado sigue:', r2json.EmailEmpleado);
-    }
-    return newId;
+    console.log('Registro creado en SharePoint (id:', data.id, ')');
+    return data.id;
   }
 }
 
-// Al reabrir la nota: cambia el Estado a "Abierta" en SP
-async function actualizarEstadoSP(mes, estado) {
+// Borra el registro de la lista cuando se reabre la nota
+async function borrarRegistro(mes) {
   try {
-    const existing = await buscarRegistro(mes);
-    if (existing) {
-      const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existing.id}`;
+    const existingId = await buscarRegistro(mes);
+    if (existingId) {
+      const url = `${SP_GRAPH_BASE}/lists/${SP_LIST_REGISTRO}/items/${existingId}`;
       await fetch(url, {
-        method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: { Estado: estado, EmailEmpleado: getUserEmail() } })
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${accessToken}` }
       });
-      console.log('Estado SP actualizado a:', estado, '(id:', existing.id, ')');
-    } else {
-      // No existe aún — crear fila mínima para dejar rastro
-      await escribirEnRegistro(mes, estado);
+      console.log('Registro borrado de SharePoint (id:', existingId, ')');
     }
   } catch (e) {
-    console.warn('No se pudo actualizar estado en SP:', e.message);
-    throw e;
+    console.warn('No se pudo borrar el registro:', e.message);
   }
 }
 
-// Sube el PDF al OneDrive del empleado y lo comparte con el admin (para Power Automate)
-// Ruta: Notas de Gastos/YYYY-MM/nota-gastos-YYYY-MM.pdf
-async function uploadPDFToOneDrive(mes, blob) {
-  const emailUser = getUserEmail().replace('@', '_at_');
-  const path = `${FOLDER_NAME}/${mes}/nota-gastos-${mes}.pdf`;
-  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
-  const uploadUrl = `https://graph.microsoft.com/v1.0/me/drive/root:/${encodedPath}:/content`;
+// Sube un archivo a la biblioteca de documentos del sitio SharePoint
+let spSiteId = null;
+async function getSharePointSiteId() {
+  if (spSiteId) return spSiteId;
+  const url = `${SP_GRAPH_BASE}`;
+  console.log('Obteniendo site info de:', url);
+  const res = await fetch(url, { headers: { 'Authorization': `Bearer ${accessToken}` } });
+  if (!res.ok) throw new Error('No se pudo obtener site info: ' + res.status);
+  const data = await res.json();
+  spSiteId = data.id;
+  console.log('SharePoint site ID:', spSiteId);
+  return spSiteId;
+}
 
-  console.log('Subiendo PDF a OneDrive:', uploadUrl);
-  const res = await fetch(uploadUrl, {
+async function uploadToSharePoint(filePath, blob) {
+  const siteId = await getSharePointSiteId();
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drive/root:/${encodedPath}:/content`;
+  console.log('Upload URL:', url);
+  const res = await fetch(url, {
     method: 'PUT',
-    headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/pdf' },
+    headers: {
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': blob.type || 'application/octet-stream'
+    },
     body: blob
   });
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`OneDrive PDF upload error ${res.status}: ${errText.slice(0,200)}`);
+    throw new Error(`SharePoint upload error ${res.status}: ${errText.slice(0,200)}`);
   }
   const data = await res.json();
-  const itemId = data.id;
-  const webUrl = data.webUrl;
-  console.log('PDF subido a OneDrive. itemId:', itemId, '| URL:', webUrl);
-
-  // Compartir con el admin (EMAIL_ILDEFONSO o luis.lopez) para que Power Automate pueda acceder
-  try {
-    const shareUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${itemId}/invite`;
-    const shareRes = await fetch(shareUrl, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        recipients: [{ email: EMAIL_ADMIN_FLOW }],
-        roles: ['read'],
-        sendInvitation: false,
-        requireSignIn: true
-      })
-    });
-    if (shareRes.ok) {
-      console.log('PDF compartido con:', EMAIL_ADMIN_FLOW);
-    } else {
-      const shareErr = await shareRes.text();
-      console.warn('No se pudo compartir PDF (no crítico):', shareRes.status, shareErr.slice(0,200));
-    }
-  } catch(e) {
-    console.warn('Error al compartir PDF (no crítico):', e.message);
-  }
-
-  return webUrl;
+  console.log('Archivo subido a SharePoint:', data.webUrl);
+  return data.webUrl;
 }
 
 async function uploadFile(path, blob) {
