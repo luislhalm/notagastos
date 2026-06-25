@@ -1094,66 +1094,72 @@ async function generatePDF() {
   });
 
   // ---- PÁGINAS DE TICKETS (2 por página, altura máxima controlada) ----
-  // Cada ticket ocupa como máximo la mitad de la página (con margen entre ellos)
-  const SLOT_H = (ph - margin * 2 - 10) / 2; // altura disponible por slot (~126 mm)
-  const IMG_MAX_W = usableW;                   // ancho máximo de imagen = ancho útil
-  const IMG_MAX_H = SLOT_H - 14;              // reservar 14 mm para el título del ticket
-  const TITULO_H = 8;                          // altura del título en mm
+  // A4: 297mm alto, márgenes 15mm arriba y abajo → 267mm útiles
+  // Dividimos en 2 slots de 130mm cada uno con 7mm de separación entre ellos
+  // Cada slot: 7mm título + hasta 120mm de imagen
+  const PAGE_USABLE_H = ph - margin * 2;   // 267mm
+  const SEP = 7;                             // separación entre los 2 slots
+  const SLOT_H = (PAGE_USABLE_H - SEP) / 2; // ~130mm por slot
+  const TITLE_H = 7;                         // mm reservados para el título
+  const IMG_MAX_H = SLOT_H - TITLE_H - 3;   // ~120mm máximo de imagen
+  const IMG_MAX_W = usableW;                 // 180mm ancho máximo
 
-  // Pre-comprimir todas las imágenes
+  // Helper: dibuja un ticket en la posición Y indicada
+  function dibujarTicketEnSlot(t, comp, slotY) {
+    // Título
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    const catLabel = CATEGORIAS.find(c => c.id === t.categoria)?.label || '';
+    const titulo = `#${t.num}  ${t.fecha || 'Sin fecha'}  ·  ${t.detalle || catLabel}  ·  ${formatearImporte(t.importe)} €`;
+    doc.text(titulo, margin, slotY + 5);
+
+    if (!comp) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text('(Sin imagen)', margin, slotY + TITLE_H + 5);
+      return;
+    }
+
+    // Calcular tamaño de imagen respetando AMBOS límites (ancho y alto)
+    const ratio = comp.h / comp.w;           // píxeles → ratio proporcional
+    let imgW = IMG_MAX_W;
+    let imgH = imgW * ratio;
+    if (imgH > IMG_MAX_H) {                  // si se pasa de alto, ajustar por alto
+      imgH = IMG_MAX_H;
+      imgW = imgH / ratio;
+    }
+    // Centrar horizontalmente dentro del área útil
+    const imgX = margin + (IMG_MAX_W - imgW) / 2;
+    doc.addImage(comp.dataUrl, 'JPEG', imgX, slotY + TITLE_H, imgW, imgH);
+  }
+
+  // Pre-comprimir todas las imágenes (paralelo)
   const comprimidas = await Promise.all(sorted.map(async t => {
     if (!t.imageDataUrl) return null;
-    try { return await comprimirImagen(t.imageDataUrl, 700, 0.5); }
+    try { return await comprimirImagen(t.imageDataUrl, 600, 0.5); }
     catch { return null; }
   }));
 
+  // Renderizar de 2 en 2
   for (let i = 0; i < sorted.length; i += 2) {
     doc.addPage();
-    let slotY = margin;
 
-    for (let slot = 0; slot < 2; slot++) {
-      const idx = i + slot;
-      if (idx >= sorted.length) break;
-      const t = sorted[idx];
-      const comp = comprimidas[idx];
+    // Slot superior
+    const slotY1 = margin;
+    dibujarTicketEnSlot(sorted[i], comprimidas[i], slotY1);
 
-      // Título del ticket
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'bold');
-      const catLabel = CATEGORIAS.find(c => c.id === t.categoria)?.label || '';
-      const titulo = `#${t.num || idx + 1}  ${t.fecha || 'Sin fecha'}  ·  ${t.detalle || catLabel}  ·  ${formatearImporte(t.importe)} €`;
-      doc.text(titulo, margin, slotY + 5);
+    // Línea separadora (solo si hay segundo ticket)
+    if (i + 1 < sorted.length) {
+      const lineY = margin + SLOT_H + SEP / 2;
+      doc.setDrawColor(180);
+      doc.setLineDashPattern([3, 3], 0);
+      doc.line(margin, lineY, pw - margin, lineY);
+      doc.setLineDashPattern([], 0);
+      doc.setDrawColor(0);
 
-      // Imagen
-      if (comp) {
-        const imgRatio = comp.h / comp.w;
-        // Calcular dimensiones respetando límites de ancho Y altura
-        let finalW = IMG_MAX_W;
-        let finalH = finalW * imgRatio;
-        if (finalH > IMG_MAX_H) {
-          finalH = IMG_MAX_H;
-          finalW = finalH / imgRatio;
-        }
-        // Centrar horizontalmente
-        const imgX = margin + (usableW - finalW) / 2;
-        doc.addImage(comp.dataUrl, 'JPEG', imgX, slotY + TITULO_H, finalW, finalH);
-      } else {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(8);
-        doc.text('(Sin imagen)', margin, slotY + TITULO_H + 5);
-      }
-
-      // Separador entre los dos slots (solo si hay dos tickets en la página)
-      if (slot === 0 && i + 1 < sorted.length) {
-        const sepY = slotY + SLOT_H + 5;
-        doc.setDrawColor(200);
-        doc.setLineDashPattern([2, 2], 0);
-        doc.line(margin, sepY, pw - margin, sepY);
-        doc.setLineDashPattern([], 0);
-        doc.setDrawColor(100);
-      }
-
-      slotY += SLOT_H + 10; // pasar al segundo slot
+      // Slot inferior
+      const slotY2 = margin + SLOT_H + SEP;
+      dibujarTicketEnSlot(sorted[i + 1], comprimidas[i + 1], slotY2);
     }
   }
 
