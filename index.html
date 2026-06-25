@@ -1093,33 +1093,67 @@ async function generatePDF() {
     y += 4;
   });
 
-  // ---- PÁGINAS DE TICKETS ----
-  for (let i = 0; i < sorted.length; i++) {
-    const t = sorted[i];
-    if (!t.imageDataUrl) continue;
+  // ---- PÁGINAS DE TICKETS (2 por página, altura máxima controlada) ----
+  // Cada ticket ocupa como máximo la mitad de la página (con margen entre ellos)
+  const SLOT_H = (ph - margin * 2 - 10) / 2; // altura disponible por slot (~126 mm)
+  const IMG_MAX_W = usableW;                   // ancho máximo de imagen = ancho útil
+  const IMG_MAX_H = SLOT_H - 14;              // reservar 14 mm para el título del ticket
+  const TITULO_H = 8;                          // altura del título en mm
 
+  // Pre-comprimir todas las imágenes
+  const comprimidas = await Promise.all(sorted.map(async t => {
+    if (!t.imageDataUrl) return null;
+    try { return await comprimirImagen(t.imageDataUrl, 700, 0.5); }
+    catch { return null; }
+  }));
+
+  for (let i = 0; i < sorted.length; i += 2) {
     doc.addPage();
-    y = margin;
+    let slotY = margin;
 
-    // Título del ticket
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    const catLabel = CATEGORIAS.find(c => c.id === t.categoria)?.label || '';
-    doc.text(`Ticket #${t.num || i + 1} — ${t.fecha || 'Sin fecha'} — ${t.detalle || catLabel} — ${formatearImporte(t.importe)} €`, margin, y);
-    y += 8;
+    for (let slot = 0; slot < 2; slot++) {
+      const idx = i + slot;
+      if (idx >= sorted.length) break;
+      const t = sorted[idx];
+      const comp = comprimidas[idx];
 
-    // Comprimir e insertar imagen
-    try {
-      const comp = await comprimirImagen(t.imageDataUrl, 800, 0.5);
-      const imgRatio = comp.h / comp.w;
-      const imgW = Math.min(usableW, 160);
-      const imgH = imgW * imgRatio;
-      const maxH = ph - y - margin;
-      const finalW = imgH > maxH ? (maxH / imgRatio) : imgW;
-      const finalH = finalW * imgRatio;
-      doc.addImage(comp.dataUrl, 'JPEG', margin, y, finalW, finalH);
-    } catch (e) {
-      doc.text('(Error al cargar imagen del ticket)', margin, y);
+      // Título del ticket
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      const catLabel = CATEGORIAS.find(c => c.id === t.categoria)?.label || '';
+      const titulo = `#${t.num || idx + 1}  ${t.fecha || 'Sin fecha'}  ·  ${t.detalle || catLabel}  ·  ${formatearImporte(t.importe)} €`;
+      doc.text(titulo, margin, slotY + 5);
+
+      // Imagen
+      if (comp) {
+        const imgRatio = comp.h / comp.w;
+        // Calcular dimensiones respetando límites de ancho Y altura
+        let finalW = IMG_MAX_W;
+        let finalH = finalW * imgRatio;
+        if (finalH > IMG_MAX_H) {
+          finalH = IMG_MAX_H;
+          finalW = finalH / imgRatio;
+        }
+        // Centrar horizontalmente
+        const imgX = margin + (usableW - finalW) / 2;
+        doc.addImage(comp.dataUrl, 'JPEG', imgX, slotY + TITULO_H, finalW, finalH);
+      } else {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.text('(Sin imagen)', margin, slotY + TITULO_H + 5);
+      }
+
+      // Separador entre los dos slots (solo si hay dos tickets en la página)
+      if (slot === 0 && i + 1 < sorted.length) {
+        const sepY = slotY + SLOT_H + 5;
+        doc.setDrawColor(200);
+        doc.setLineDashPattern([2, 2], 0);
+        doc.line(margin, sepY, pw - margin, sepY);
+        doc.setLineDashPattern([], 0);
+        doc.setDrawColor(100);
+      }
+
+      slotY += SLOT_H + 10; // pasar al segundo slot
     }
   }
 
