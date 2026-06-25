@@ -854,8 +854,8 @@ function actualizarEstadoUI() {
   // Botones cerrar/abrir
   document.getElementById('cerrarBtn').classList.toggle('hidden', cerrada);
   document.getElementById('abrirBtn').classList.toggle('hidden', !cerrada);
-  // Selector de mes: deshabilitar si cerrada para evitar cambios accidentales
-  document.getElementById('monthPicker').disabled = cerrada;
+  // El selector de mes siempre habilitado — al cambiar de mes se carga el estado correcto
+  document.getElementById('monthPicker').disabled = false;
   renderTable();
 }
 
