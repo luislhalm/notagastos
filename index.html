@@ -737,10 +737,28 @@ function parseTicket(text) {
     amounts.sort((a,b) => b.priority - a.priority || b.val - a.val);
     importe = amounts[0].val.toFixed(2);
   }
-  // Fecha
-  let fecha = '';
-  const dateRe = /(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/;
-  for (const l of lines) { const m = l.match(dateRe); if (m) { fecha = m[1]; break; } }
+  // Fecha: recopilar todas las fechas válidas (año actual o anterior) y priorizar
+  // las del mes de la nota — lo normal es que el ticket sea del mes que se está capturando
+  const anoActual = new Date().getFullYear();
+  const mesNota = document.getElementById('monthPicker').value; // "YYYY-MM"
+  const [mesNotaAno, mesNotaMes] = mesNota ? mesNota.split('-').map(Number) : [null, null];
+  const dateRe = /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/g;
+  const fechasValidas = [];
+  for (const l of lines) {
+    let m;
+    while ((m = dateRe.exec(l)) !== null) {
+      const dd = parseInt(m[1]), mm = parseInt(m[2]);
+      let ano = parseInt(m[3]);
+      if (ano < 100) ano += 2000; // "25" → 2025
+      if (ano !== anoActual && ano !== anoActual - 1) continue; // año inválido
+      if (dd < 1 || dd > 31 || mm < 1 || mm > 12) continue;   // día/mes imposible
+      const esMesNota = (mesNotaAno && ano === mesNotaAno && mm === mesNotaMes);
+      fechasValidas.push({ raw: m[0], prioridad: esMesNota ? 2 : 1 });
+    }
+  }
+  // Elegir la de mayor prioridad (mes de la nota > cualquier otro mes válido)
+  fechasValidas.sort((a, b) => b.prioridad - a.prioridad);
+  const fecha = fechasValidas.length ? fechasValidas[0].raw : '';
   return { fecha, importe };
 }
 
@@ -854,8 +872,8 @@ function actualizarEstadoUI() {
   // Botones cerrar/abrir
   document.getElementById('cerrarBtn').classList.toggle('hidden', cerrada);
   document.getElementById('abrirBtn').classList.toggle('hidden', !cerrada);
-  // Selector de mes: deshabilitar si cerrada para evitar cambios accidentales
-  document.getElementById('monthPicker').disabled = cerrada;
+  // Selector de mes: siempre habilitado para poder navegar a otros meses
+  document.getElementById('monthPicker').disabled = false;
   renderTable();
 }
 
