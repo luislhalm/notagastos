@@ -565,12 +565,15 @@ function handleFileUpload(e) {
 }
 
 // ---- OCR ----
-// Mejora la legibilidad de la imagen para el OCR: escala de grises, contraste y tamaño
+// Mejora la legibilidad de la imagen para el OCR.
+// Tickets térmicos: se usan caracteres especiales como el cero barrado (⓪),
+// que requieren mayor resolución y binarización para que Tesseract los lea bien.
 function preprocesarImagen(dataUrl) {
   return new Promise(resolve => {
     const img = new Image();
     img.onload = () => {
-      const targetW = 1500;
+      // Subir a 2000px mínimo (antes 1500) para que los caracteres pequeños sean más nítidos
+      const targetW = 2000;
       const scale = img.width < targetW ? targetW / img.width : 1;
       const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
       const cv = document.createElement('canvas');
@@ -579,15 +582,22 @@ function preprocesarImagen(dataUrl) {
       ctx.drawImage(img, 0, 0, w, h);
       const imgData = ctx.getImageData(0, 0, w, h);
       const d = imgData.data;
-      const contraste = 1.4, brillo = -10;
-      for (let i=0; i<d.length; i+=4) {
-        let gray = 0.299*d[i] + 0.587*d[i+1] + 0.114*d[i+2];
+      // Paso 1: escala de grises + contraste más agresivo
+      const contraste = 1.8, brillo = -20;
+      for (let i = 0; i < d.length; i += 4) {
+        let gray = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
         gray = (gray - 128) * contraste + 128 + brillo;
         gray = Math.max(0, Math.min(255, gray));
         d[i] = d[i+1] = d[i+2] = gray;
       }
+      // Paso 2: umbralización adaptativa simple — pixeles por encima de 160 → blanco, resto → negro
+      // Esto convierte el ticket en blanco/negro puro, lo que ayuda muchísimo con fuentes raras
+      for (let i = 0; i < d.length; i += 4) {
+        const v = d[i] > 160 ? 255 : 0;
+        d[i] = d[i+1] = d[i+2] = v;
+      }
       ctx.putImageData(imgData, 0, 0);
-      resolve(cv.toDataURL('image/jpeg', 0.9));
+      resolve(cv.toDataURL('image/png')); // PNG sin pérdida para no degradar el binarizado
     };
     img.onerror = () => resolve(dataUrl);
     img.src = dataUrl;
@@ -623,9 +633,13 @@ async function processImage(dataUrl) {
         if (m.status === 'recognizing text') {
           document.getElementById('ocrProgress').style.width = (m.progress*100) + '%';
         }
-      }
+      },
+      // PSM 6: bloque de texto uniforme (ideal para tickets de una columna)
+      tessedit_pageseg_mode: '6'
     });
-    const text = data.text;
+    // Normalizar caracteres que el OCR confunde en tickets térmicos
+    // antes de intentar parsear fechas e importes
+    const text = normalizarTextoOCR(data.text);
     const parsed = parseTicket(text);
     const catDetectada = detectarCategoria(text);
 
@@ -727,6 +741,27 @@ function descartarTicket() {
   pendingTicket = null;
   document.getElementById('validateCard').classList.add('hidden');
   setSaveStatus("Ticket descartado.", '');
+}
+
+// Normaliza caracteres que el OCR confunde frecuentemente en tickets térmicos.
+// Se aplica solo en el contexto de secuencias que parecen fechas o números,
+// para no distorsionar el texto de detalle o categoría.
+function normalizarTextoOCR(text) {
+  return text
+    // Cero barrado y variantes que Tesseract lee como otra cosa
+    .replace(/Ø/g, '0')
+    .replace(/ø/g, '0')
+    .replace(/⓪/g, '0')
+    // En secuencias de dígitos: O/o → 0, l/I → 1, S → 5, Z → 2, B → 8
+    // Solo sustituye cuando está rodeado de dígitos o separadores de fecha (/.-:)
+    .replace(/(?<=[\d\/\-\.])O(?=[\d\/\-\.])/g, '0')
+    .replace(/(?<=[\d\/\-\.])o(?=[\d\/\-\.])/g, '0')
+    .replace(/(?<=[\d\/\-\.])l(?=[\d\/\-\.])/g, '1')
+    .replace(/(?<=[\d\/\-\.])I(?=[\d\/\-\.])/g, '1')
+    // Separadores de fecha: a veces el OCR lee "/" como "I" o "l" entre dígitos
+    .replace(/(\d{1,2})[Il](\d{1,2})[Il](\d{2,4})/g, '$1/$2/$3')
+    // Espacios dentro de fechas: "12 /06/ 2026" → "12/06/2026"
+    .replace(/(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(\d{2,4})/g, '$1/$2/$3');
 }
 
 // Extracción heurística de fecha e importe (detalle lo rellena el usuario)
